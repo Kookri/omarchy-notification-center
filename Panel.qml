@@ -10,7 +10,7 @@ import "components"
 // A notification center for Omarchy: everything you were sent, still there
 // when you go back for it.
 //
-// Omarchy already writes every notification to disk — one JSON file per popup
+// Omarchy already writes every notification to disk: one JSON file per popup
 // under ~/.local/state/omarchy/notifications/, moved into history/ when it
 // leaves the screen. That is where these come from, and nothing here writes to
 // those directories. What it is not is a history you can read: it holds ten
@@ -44,7 +44,7 @@ Panel {
   // ----------------------------------------------------------------- settings
 
   readonly property int panelWidth: setting("panelWidth", 420)
-  readonly property int listHeight: setting("listHeight", 480)
+  readonly property int listHeight: setting("listHeight", 0)
   readonly property string badge: setting("badge", "Dot")
   readonly property int keepDays: setting("keepDays", 30)
   readonly property int maxItems: setting("maxItems", 1000)
@@ -91,7 +91,7 @@ Panel {
   property double lastSeen: 0
   // What the rows are marked against. Opening the center makes everything in
   // it read, so marking against `lastSeen` would mean the list never once
-  // shows you which of these you had not seen — the marks would be gone by the
+  // shows you which of these you had not seen, because the marks would be gone by the
   // time it finished drawing. This holds the reading from the moment before
   // you opened it, which is the question you were asking.
   property double readMark: 0
@@ -159,7 +159,7 @@ Panel {
     }
     // A watcher that died takes the live half of the panel with it and says
     // nothing, so it is picked back up. The delay is what keeps a store that
-    // fails immediately — no jq, no inotifywait — from becoming a process
+    // fails immediately, with no jq or no inotifywait, from becoming a process
     // being spawned in a loop.
     onExited: restartWatch.restart()
   }
@@ -333,8 +333,8 @@ Panel {
   // --------------------------------------------------------------- activating
 
   // What a click on an old notification should do. The command a notification
-  // carried is the thing its sender meant by "click me" — a screenshot toast
-  // opens its screenshot, an installer toast restarts the shell — and it is
+  // carried is the thing its sender meant by "click me": a screenshot toast
+  // opens its screenshot, an installer toast restarts the shell, and it is
   // still the right answer a week later for the first kind and a strange one
   // for the second, which is why refusing to run them is a setting.
   function activate(row) {
@@ -420,7 +420,7 @@ Panel {
 
   // Where the panel hangs from: a zero-width point far past the right edge of
   // any screen. Invisible, in the layout for nothing, and read only for its
-  // position — see the anchor comment on the panel itself.
+  // position; see the anchor comment on the panel itself.
   Item {
     id: rightAnchor
     anchors.top: button.top
@@ -513,6 +513,7 @@ Panel {
         // -------------------------------------------------------- header
 
         Item {
+          id: header
           width: parent.width
           height: Math.max(title.implicitHeight, actions.height)
 
@@ -534,9 +535,14 @@ Panel {
             // Search is a button rather than a field standing open. An open
             // field takes the keyboard the moment the panel appears, and this
             // panel can be opened from a key binding while you are typing
-            // somewhere else — which is exactly how it ends up eating a
+            // somewhere else, which is exactly how it ends up eating a
             // sentence out of the window underneath.
             PanelActionButton {
+              // Anchored rather than left to the Row, which stacks its
+              // children from the top: an icon button and a text button are
+              // not the same height, and the difference shows as a word
+              // sitting above a row of glyphs.
+              anchors.verticalCenter: parent.verticalCenter
               // U+F0349, nf-md-magnify.
               iconText: "\uDB80\uDF49"
               tooltipText: "Search these notifications  ( / )"
@@ -547,6 +553,7 @@ Panel {
             }
 
             PanelActionButton {
+              anchors.verticalCenter: parent.verticalCenter
               iconText: root.dnd ? "\uDB80\uDC9B" : "\uDB80\uDC9A"
               tooltipText: root.dnd ? "Allow notifications" : "Silence notifications"
               foreground: root.dnd ? Color.accent : root.foreground
@@ -556,10 +563,11 @@ Panel {
             }
 
             // A word rather than a glyph. Everything in this row is
-            // destructive in a different way — one silences, one deletes —
+            // destructive in a different way, one silences and one deletes,
             // and a picture of a broom is not the place to find that out.
             Button {
               id: clearButton
+              anchors.verticalCenter: parent.verticalCenter
               // Deleting a month of notifications is one click away from
               // silencing them, and there is no undo. A second click is
               // cheaper than a dialog and enough to make it deliberate; it
@@ -614,10 +622,23 @@ Panel {
         ListView {
           id: list
           width: parent.width
-          // Grows with what it holds up to the ceiling, then scrolls. A panel
-          // sized to its longest possible list would be a panel that is mostly
-          // empty on the days you have nothing waiting.
-          height: Math.min(contentHeight, Style.space(root.listHeight))
+          // Grows with what it holds and stops at the bottom of the screen,
+          // which is where macOS puts the end of its notification column. The
+          // ceiling is what is left of the screen once the header, the search
+          // field and the footer have had their share, so the panel fills the
+          // display without ever being taller than it.
+          //
+          // Search is counted in whether it is showing or not: opening it must
+          // not push the footer out through the bottom of the card.
+          readonly property int cap: {
+            if (root.listHeight > 0) return Style.space(root.listHeight)
+            var chrome = header.height + search.implicitHeight + foot.implicitHeight
+                       + content.spacing * 3
+            return Math.max(Style.space(240),
+                            popup.availableCardHeight - popup.verticalContentInset - chrome)
+          }
+
+          height: Math.min(contentHeight, cap)
           visible: rows.count > 0
           clip: true
           model: rows
@@ -698,6 +719,7 @@ Panel {
         // ---------------------------------------------------------- foot
 
         Text {
+          id: foot
           width: parent.width
           visible: root.entries.length > 0 && root.filter === ""
           horizontalAlignment: Text.AlignHCenter

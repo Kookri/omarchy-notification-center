@@ -5,6 +5,8 @@ were sent. A bell on the right of the bar, a dot on it when something has come
 in, and a panel of everything you were told, in the order you were told it,
 still there tomorrow.
 
+<img src="screenshots/desktop.png" alt="The notification center open on the right of the screen, a column of cards under Today and Yesterday" width="720">
+
 Omarchy already shows you a notification once. This is the answer to the other
 question, the one that comes ten minutes later while you are in the middle of
 something else: *what did that say?*
@@ -15,7 +17,7 @@ Omarchy's notification service writes every notification to disk on its way
 past: one JSON file per popup under
 `~/.local/state/omarchy/notifications/`, moved into `history/` when it leaves
 the screen. That is the source here, and nothing in this plugin writes to those
-directories — it only reads them.
+directories: it only reads them.
 
 What it is not is a history you can read. It keeps ten files, deletes the
 eleventh, and deletes the icon it was keeping for it at the same time. Ten is
@@ -52,13 +54,13 @@ ask once you are already interested, and a bar you have to read is a bar you
 stop reading. Set **Mark what you have not read** to `Count` for the number, or
 `None` for a bell that never changes.
 
-Right-clicking the bell silences notifications without opening anything —
+Right-clicking the bell silences notifications without opening anything,
 deciding you want quiet and wanting to read the backlog are opposite impulses.
 
 **In the panel**, one card per notification, newest first, under the day it
 arrived on: *Today*, *Yesterday*, then the weekday for the rest of the week and
 the date beyond it. Each card carries the app's own icon, what it said, and how
-long ago — minutes while that is still the useful answer, then the clock.
+long ago: minutes while that is still the useful answer, then the clock.
 
 - **Clicking a card** does what the notification itself asked for. A screenshot
   toast still opens its screenshot a week later; a chat notification, which
@@ -70,7 +72,7 @@ long ago — minutes while that is still the useful answer, then the clock.
 - **The bell in the header** is Do Not Disturb, the same switch as the bar's
   DND indicator and the menu's. It is here because silencing notifications and
   catching up on them are the same conversation.
-- **The magnifier**, or `/`, searches everything kept — app, subject and
+- **The magnifier**, or `/`, searches everything kept: app, subject and
   message. Escape leaves the search, Escape again closes the panel.
 
 Notifications that arrived while you were away are marked with a dot in the
@@ -86,7 +88,7 @@ ones were new when you opened it.
 | Keep notifications for | 30 days | Older than this is deleted, icon and all. |
 | Keep at most | 1000 | A ceiling regardless of age. Whichever limit is hit first wins. |
 | Clicking a notification | Auto | `Auto` runs what the notification asked for and falls back to focusing the app; `Focus the app` never runs a stored command; `Nothing` makes the list read-only. |
-| Show the message text | on | Off leaves the sender and subject only — the version to run on a screen other people can see. |
+| Show the message text | on | Off leaves the sender and subject only, the version to run on a screen other people can see. |
 | Panel width | 420 | In the shell's spacing units. |
 | List height | 480 | How tall the list grows before it scrolls. |
 
@@ -120,7 +122,7 @@ accident should not cost you the archive.
 ## The command line
 
 `bin/notification-center` is the whole of the storage side and is useful on its
-own — it is how you search further back than the panel loads:
+own, and it is how you search further back than the panel loads:
 
 ```
 watch              follow the notification service and archive what it receives

@@ -21,7 +21,7 @@
     "defaultSection": "right",
     "defaults": {
       "panelWidth": 420,
-      "listHeight": 480,
+      "listHeight": 0,
       "badge": "Dot",
       "keepDays": 30,
       "maxItems": 1000,
@@ -94,11 +94,11 @@
         "key": "listHeight",
         "type": "integer",
         "label": "List height",
-        "min": 200,
+        "min": 0,
         "max": 1200,
         "step": 20,
-        "defaultValue": 480,
-        "description": "How tall the list is allowed to grow before it starts scrolling. A short list that scrolls beats a tall one that runs off the screen."
+        "defaultValue": 0,
+        "description": "In the shell's spacing units, or 0 to let the list run to the bottom of the screen, which is where macOS ends its notification column and the reason 0 is the default. A number stops it sooner: a short list that scrolls, rather than a tall one that fills the display."
       }
     ]
   }
