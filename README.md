@@ -2,36 +2,12 @@
 
 An [Omarchy](https://omarchy.org) bar widget that keeps the notifications you
 were sent. A bell on the right of the bar, a dot on it when something has come
-in, and a panel of everything you were told, in the order you were told it,
-still there tomorrow.
+in, and a panel of everything you were told, still there tomorrow.
+
+Omarchy shows a notification once. This answers the question that comes ten
+minutes later, in the middle of something else: *what did that say?*
 
 <img src="screenshots/desktop.png" alt="The notification center open on the right of the screen, a column of cards under Today and Yesterday" width="720">
-
-Omarchy already shows you a notification once. This is the answer to the other
-question, the one that comes ten minutes later while you are in the middle of
-something else: *what did that say?*
-
-## Where the notifications come from
-
-Omarchy's notification service writes every notification to disk on its way
-past: one JSON file per popup under
-`~/.local/state/omarchy/notifications/`, moved into `history/` when it leaves
-the screen. That is the source here, and nothing in this plugin writes to those
-directories: it only reads them.
-
-What it is not is a history you can read. It keeps ten files, deletes the
-eleventh, and deletes the icon it was keeping for it at the same time. Ten is
-the right number for a service whose job is replaying the toasts you just
-missed, and far too few for the question this panel exists to answer.
-
-So `bin/notification-center` copies each file out of there the moment it
-lands, into an archive of its own with the icon copied beside it. It follows
-the directory with inotify rather than polling it, so a notification is
-archived before its toast has finished appearing. The archive keeps 30 days or
-1000 notifications, whichever runs out first, and both are settings.
-
-That also means it only catches what arrives while the shell is running, which
-is every notification you were actually shown.
 
 ## Install
 
@@ -39,142 +15,82 @@ is every notification you were actually shown.
 omarchy plugin add https://github.com/jankeesvw/omarchy-notification-center.git --enable
 ```
 
-That is the whole of the setup. It needs `jq` and `inotifywait`
-(`inotify-tools`), both of which Omarchy already has.
+Needs `jq` and `inotifywait`, both of which Omarchy already has. Leave the bell
+at the far right of the bar: the panel is pinned to the right edge of the
+screen, so a bell in the middle is a bell whose panel opens somewhere else.
 
-The bell lands on the right of the bar. Leave it at the far right: the panel is
-pinned to the right edge of the screen whatever happens, so a bell in the
-middle of the bar is a bell whose panel opens somewhere else.
+## What it does
 
-## What it shows
+Omarchy's notification service already writes every notification to disk, and
+then keeps only the last ten. This copies each one out of there as it lands,
+icon and all, and keeps it for 30 days.
 
-**In the bar**, a bell, and a dot on it when something has arrived since you
-last opened the center. Not a number, by default: how many is a question you
-ask once you are already interested, and a bar you have to read is a bar you
-stop reading. Set **Mark what you have not read** to `Count` for the number, or
-`None` for a bell that never changes.
-
-Right-clicking the bell silences notifications without opening anything,
-deciding you want quiet and wanting to read the backlog are opposite impulses.
-
-**In the panel**, one card per notification, newest first, under the day it
-arrived on: *Today*, *Yesterday*, then the weekday for the rest of the week and
-the date beyond it. Each card carries the app's own icon, what it said, and how
-long ago: minutes while that is still the useful answer, then the clock.
-
-- **A picture, when there was one.** A camera catching movement and a
-  screenshot tool taking a shot both hand their file to the notification's
-  action rather than setting an image on it, so the panel reads the path out of
-  there and keeps a copy of its own, scaled down to the width it is shown at.
-  Wide rather than a thumbnail in the corner: a motion alert is entirely about
-  what is in the frame, and at thumbnail size the answer to "what set it off"
-  is still "go and open it".
-- **Clicking a card** does what the notification itself asked for. A screenshot
-  toast still opens its screenshot a week later; a chat notification, which
-  almost never registers an action, focuses the app that sent it. That is the
-  same fallback Omarchy's own toasts use, so a click here lands where a click
-  on the toast would have.
-- **The × in the corner**, or a right-click anywhere on the card, removes one.
-- **Clear** empties the archive, and asks a second time before it does.
-- **The bell in the header** is Do Not Disturb, the same switch as the bar's
-  DND indicator and the menu's. It is here because silencing notifications and
-  catching up on them are the same conversation.
-- **The magnifier**, or `/`, searches everything kept: app, subject and
-  message. Escape leaves the search, Escape again closes the panel.
-
-Notifications that arrived while you were away are marked with a dot in the
-accent colour, and the marks survive the panel being drawn: opening the center
-makes everything read, but the list you are looking at still shows you which
-ones were new when you opened it.
+- One card per notification, newest first, under the day it arrived on.
+- **Clicking a card** does what the notification asked for, so a screenshot
+  toast still opens its screenshot a week later, and otherwise focuses the app
+  that sent it.
+- **A picture** when there was one. Cameras and screenshot tools hand their
+  file to the notification's action rather than setting an image on it, so the
+  path is read out of there and a scaled copy is kept.
+- **The × on a card**, or a right-click, removes one. **Clear** empties the
+  archive and asks twice.
+- **The bell in the header** is Do Not Disturb, the same switch as the bar's.
+  Right-clicking the bell in the bar does it without opening anything.
+- **The magnifier**, or `/`, searches everything kept. Escape leaves the
+  search, Escape again closes the panel.
 
 ## Settings
 
-| Setting | Default | What it does |
+| Setting | Default | |
 | --- | --- | --- |
-| Mark what you have not read | Dot | `Dot`, `Count`, or `None` on the bell. |
+| Mark what you have not read | Dot | `Dot`, `Count` or `None` on the bell. |
 | Keep notifications for | 30 days | Older than this is deleted, icon and all. |
-| Keep at most | 1000 | A ceiling regardless of age. Whichever limit is hit first wins. |
-| Clicking a notification | Auto | `Auto` runs what the notification asked for and falls back to focusing the app; `Focus the app` never runs a stored command; `Nothing` makes the list read-only. |
-| Show the message text | on | Off leaves the sender and subject only, the version to run on a screen other people can see. |
-| Show pictures | on | Off keeps the text and leaves the picture where it was. New notifications stop being copied as well, so it is a storage setting as much as a display one. |
+| Keep at most | 1000 | A ceiling regardless of age. |
+| Clicking a notification | Auto | Or never run a stored command, or nothing at all. |
+| Show the message text | on | Off leaves the sender and subject only. |
+| Show pictures | on | Off stops keeping copies as well. |
 | Panel width | 420 | In the shell's spacing units. |
-| List height | 480 | How tall the list grows before it scrolls. |
+| List height | 0 | 0 runs the list to the bottom of the screen. |
 
 ## Where things are kept
 
-```
-~/.local/state/omarchy-notification-center/
-  archive.jsonl      one notification per line, oldest first
-  images/            a copy of each icon and picture, named after its notification
-  seen               when the center was last opened
-```
+`~/.local/state/omarchy-notification-center/`, one line of JSON per
+notification plus a copy of every icon and picture.
 
-Which is worth knowing for one reason: **that file is every notification you
-have been sent.** Chat messages, two-factor codes, whatever an app decided to
-put in a popup. It is readable only by you and it never leaves the machine, but
-it is not something to sync, back up carelessly, or hand to anything else.
+Worth knowing for one reason: **that is every notification you have been sent**,
+chat messages and two-factor codes included. It never leaves the machine, but
+it is not something to sync or back up carelessly. `Keep notifications for` is
+the setting that limits the damage, and one day is a perfectly reasonable
+answer to it.
 
-`Keep notifications for` is the setting that limits the damage, and one day is
-a perfectly reasonable answer to it.
-
-To take the whole thing out:
+Removing the plugin leaves the archive alone, on purpose:
 
 ```bash
 omarchy plugin remove jankeesvw.notification-center
 rm -rf ~/.local/state/omarchy-notification-center
 ```
 
-The second line is deliberately not part of the first: removing a plugin by
-accident should not cost you the archive.
-
 ## The command line
 
-`bin/notification-center` is the whole of the storage side and is useful on its
-own, and it is how you search further back than the panel loads:
+`bin/notification-center` is the storage side, and how you search further back
+than the panel loads:
 
 ```
-watch              follow the notification service and archive what it receives
-sync               catch up on anything not archived yet
-list [LIMIT]       the archive as JSON, newest first (default 200)
-remove KEY         drop one notification
-clear              drop all of them
-seen [MS]          read or set when the center was last opened
-unread             how many arrived since then
-seed [N]           fill the archive with test traffic
-prune              apply the retention limits now
+list [LIMIT]       the archive as JSON, newest first
+remove KEY         drop one, or clear for all of them
+seed [N]           fill it with test traffic
+backfill           give older entries the picture their action points at
 ```
 
-`backfill` is worth one run after an upgrade: entries archived before pictures
-were kept get theirs now, as long as the file they point at is still on disk.
-
-Everything prints JSON, so nothing that goes wrong reaches the panel as a parse
-error.
+`watch`, `sync`, `seen`, `unread` and `prune` are in there too; everything
+prints JSON.
 
 ```bash
 # everything Slack sent you last week, as text
-notification-center list 2000 | jq -r '.[] | select(.app == "Slack") | "\(.timestamp) \(.summary): \(.body)"'
+notification-center list 2000 | jq -r '.[] | select(.app == "Slack") | "\(.summary): \(.body)"'
 ```
 
-## Testing it without waiting for a week of notifications
-
-Synthetic input does not reach the shell, so there is an IPC hook instead:
-
-```bash
-omarchy-shell jankeesvw.notification-center.test seed 25   # fill it with plausible traffic
-omarchy-shell jankeesvw.notification-center.test clear     # empty it again
-omarchy-shell jankeesvw.notification-center.test reload    # re-read the archive
-```
-
-Seeded entries all have keys beginning `seed-`, so they can be taken back out
-of a real archive by hand:
-
-```bash
-A=~/.local/state/omarchy-notification-center/archive.jsonl
-grep -v '"key":"seed-' "$A" > "$A.tmp" && mv "$A.tmp" "$A"
-```
-
-The panel itself is opened and closed over IPC, which is also how you bind it
-to a key:
+The panel opens over IPC, which is how you bind it to a key:
 
 ```bash
 omarchy-shell jankeesvw.notification-center toggle
