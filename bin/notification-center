@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+#
+# The store behind the notification center.
+#
+# Omarchy's notification service already writes every notification to disk: one
+# JSON file per popup under ~/.local/state/omarchy/notifications/, moved into
+# history/ when it leaves the screen. That directory is not a history you can
+# read back, though. It keeps ten files and deletes the eleventh, and the icon
+# it points at is deleted along with it.
+#
+# So this copies each file out of there the moment it appears, into an archive
+# that is kept for as long as you asked for, with its icon copied beside it so
+# the entry still has a face in a month. Nothing here writes to the service's
+# own directories: it only reads them and gets out of the way.
+#
+# Every subcommand prints JSON, one object or one array, including failures, so
+# nothing that goes wrong reaches the panel as a parse error.
+
+set -uo pipefail
+
+state_home=${XDG_STATE_HOME:-$HOME/.local/state}
+
+# Where the notification service puts what it received. Live popups sit in the
+# first, everything that left the screen in the second.
+# Overridable so the whole thing can be pointed at a scratch directory and
+# driven by hand, which is the only way to exercise the watcher without waiting
+# for real notifications to arrive.
+src_dir=${NC_SRC_DIR:-$state_home/omarchy/notifications}
+src_history=${NC_SRC_HISTORY:-$src_dir/history}
+
+# Ours.
+store=${NC_STORE:-$state_home/omarchy-notification-center}
+archive="$store/archive.jsonl"
+images="$store/images"
+seen_file="$store/seen"
+lock_file="$store/lock"
+
+# How much is kept. Both are ceilings and the tighter one wins: 30 days of a
+# quiet week is a shorter list than 1000 notifications, and 1000 notifications
+# of a loud day is a shorter list than 30 days.
+keep_days=${NC_KEEP_DAYS:-30}
+max_items=${NC_MAX_ITEMS:-1000}
+
+die() {
+  printf '{"ok":false,"error":%s}\n' "$(printf '%s' "$1" | jq -Rs .)"
+  exit 1
+}
+
+command -v jq >/dev/null 2>&1 || die "jq is not installed"
+
+# One writer at a time, for as long as one command takes. The bar widget runs
+# once per monitor, so on a two-screen desktop there are two of these racing to
+# append the same notification, and an interleaved append writes half a line.
+#
+# The lock is taken in a subshell rather than on this shell, because `watch`
+# lives for the whole session: a descriptor held open there would lock every
+# other invocation out for the rest of the day.
+with_lock() {
+  ( exec 9>"$lock_file"; flock 9; "$@" )
+}
+
+ensure_store() {
+  mkdir -p "$store" "$images" || die "cannot create $store"
+  [[ -f $archive ]] || : > "$archive"
+}
+
+now_ms() { printf '%s' "$(($(date +%s%N) / 1000000))"; }
+
+# ---------------------------------------------------------------- ingesting
+
+# Whether this notification is already in the archive. Keys are the service's
+# own file names ("1787227796695-32"): a millisecond stamp and the notification
+# id, which is unique per notification and stable across the move from the
+# popup directory into history. That is what makes catching the same file twice
+# harmless, and it has to be, because a popup is caught once while it is on
+# screen and again when it is archived.
+have_key() {
+  grep -qF "\"key\":\"$1\"" "$archive" 2>/dev/null
+}
+
+# An icon path worth copying: something on disk rather than a themed icon name
+# ("slack", "org.mozilla.firefox"), which resolves through the icon theme at
+# render time and needs nothing kept for it.
+is_path() {
+  case $1 in
+    file:///*|/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Copy one of the service's images into our own store, and answer with the path
+# to the copy. The originals live and die with the ten files the service keeps,
+# so an entry that still pointed at one would lose its face within the hour.
+copy_image() {
+  local src=$1 key=$2 slot=$3 dest
+  src=${src#file://}
+  [[ -f $src ]] || { printf '%s' ""; return; }
+  dest="$images/$key-$slot"
+  # Bounded, because these are files another program wrote and a panel has to
+  # survive one of them being enormous.
+  if timeout 5 head -c 5242881 -- "$src" > "$dest.tmp" 2>/dev/null &&
+     (( $(stat -c%s -- "$dest.tmp" 2>/dev/null || echo 0) <= 5242880 )); then
+    mv -f -- "$dest.tmp" "$dest"
+    printf 'file://%s' "$dest"
+  else
+    rm -f -- "$dest.tmp"
+    printf '%s' ""
+  fi
+}
+
+# Take one of the service's JSON files into the archive, and print the entry
+# that was added. Prints nothing at all when there was nothing to add, which is
+# how `watch` stays quiet about the second sighting of the same notification.
+ingest_file() {
+  local file=$1 key entry app_icon image_src icon_copy image_copy
+  key=$(basename -- "$file"); key=${key%.json}
+  [[ -n $key ]] || return 0
+  have_key "$key" && return 0
+  [[ -s $file ]] || return 0
+
+  # A file caught mid-write parses as nothing; it will be caught again on the
+  # move into history, or by the next sync.
+  jq -e . "$file" >/dev/null 2>&1 || return 0
+
+  app_icon=$(jq -r '.appIcon // ""' "$file")
+  image_src=$(jq -r '.image // ""' "$file")
+
+  icon_copy=$app_icon
+  image_copy=$image_src
+  is_path "$app_icon" && icon_copy=$(copy_image "$app_icon" "$key" "appIcon")
+  is_path "$image_src" && image_copy=$(copy_image "$image_src" "$key" "image")
+
+  entry=$(jq -c \
+    --arg key "$key" \
+    --arg appIcon "$icon_copy" \
+    --arg image "$image_copy" \
+    '{
+       key: $key,
+       app: (.app // ""),
+       appIcon: $appIcon,
+       summary: (.summary // ""),
+       body: (.body // ""),
+       image: $image,
+       glyph: (.glyph // ""),
+       exec: (.exec // ""),
+       urgency: (.urgency // 1),
+       timestamp: (.timestamp // 0)
+     }
+     | .timestamp = (if .timestamp > 0 then .timestamp
+                     else ((.key | split("-")[0] | tonumber?) // 0) end)' \
+    "$file" 2>/dev/null) || return 0
+  [[ -n $entry ]] || return 0
+
+  printf '%s\n' "$entry" >> "$archive"
+  printf '%s\n' "$entry"
+}
+
+# Everything the service is holding, oldest first so the archive stays in the
+# order things happened. Live popups are read before history: a notification
+# that is on screen right now belongs in the center immediately, not when it
+# expires.
+sync_all() {
+  local file
+  for file in "$src_history"/*.json "$src_dir"/*.json; do
+    [[ -e $file ]] || continue
+    ingest_file "$file"
+  done
+}
+
+# ---------------------------------------------------------------- trimming
+
+# Drop what is past either ceiling, and take the images of dropped entries with
+# them. Runs after an ingest rather than on a timer: the only thing that can
+# push the archive over a limit is something being added to it.
+prune() {
+  local cutoff kept dropped
+  cutoff=$(( $(now_ms) - keep_days * 86400000 ))
+  [[ -s $archive ]] || return 0
+
+  kept=$(jq -c --argjson cutoff "$cutoff" 'select(.timestamp >= $cutoff)' "$archive" 2>/dev/null | tail -n "$max_items")
+  dropped=$(comm -23 \
+    <(jq -r '.key' "$archive" 2>/dev/null | sort) \
+    <(printf '%s\n' "$kept" | jq -r 'select(.key) | .key' 2>/dev/null | sort))
+
+  printf '%s\n' "$kept" | grep -v '^$' > "$archive.tmp" 2>/dev/null || : > "$archive.tmp"
+  mv -f "$archive.tmp" "$archive"
+
+  local key
+  while IFS= read -r key; do
+    [[ -n $key ]] || continue
+    rm -f -- "$images/$key-appIcon" "$images/$key-image"
+  done <<< "$dropped"
+}
+
+# ---------------------------------------------------------------- commands
+
+# `sync` on the command line reports one line, like everything else here; the
+# entries it took in are only interesting to `watch`, which streams them to the
+# panel. quiet=1 is what keeps a plain sync from printing a page of JSON.
+quiet=0
+
+sync_and_prune() {
+  if (( quiet )); then
+    sync_all >/dev/null
+  else
+    sync_all
+  fi
+  prune
+}
+
+cmd_sync() {
+  ensure_store
+  with_lock sync_and_prune
+}
+
+cmd_watch() {
+  ensure_store
+  mkdir -p "$src_dir" "$src_history"
+  # Catch up first: the shell has been down, or this is the first run, and
+  # whatever arrived in the meantime is still lying in those directories.
+  cmd_sync
+
+  command -v inotifywait >/dev/null 2>&1 || die "inotifywait is not installed"
+
+  # close_write catches a popup being written, moved_to catches it being
+  # archived. The same notification arrives twice that way and the second one
+  # is dropped by the key check, which is cheaper than trying to be clever
+  # about which of the two events to listen for.
+  # Read through a descriptor rather than a pipeline, so the watcher has a pid
+  # this script can kill. Piped into a `while` loop it would be orphaned every
+  # time the shell reloads its plugins, and a day of reloads is a day of stray
+  # inotifywait processes.
+  exec 3< <(inotifywait -m -q -e close_write -e moved_to --format '%w%f' \
+    "$src_dir" "$src_history" 2>/dev/null)
+  watcher=$!
+  trap 'kill "$watcher" 2>/dev/null' EXIT INT TERM
+
+  while IFS= read -r file <&3; do
+    [[ $file == *.json ]] || continue
+    with_lock ingest_one "$file"
+  done
+}
+
+ingest_one() {
+  ingest_file "$1"
+  prune
+}
+
+cmd_list() {
+  ensure_store
+  local limit=${1:-200}
+  # Newest first, because that is the order it is read in.
+  tail -n "$limit" "$archive" 2>/dev/null | tac | jq -s '.' 2>/dev/null || printf '[]\n'
+}
+
+remove_key() {
+  local key=$1
+  grep -vF "\"key\":\"$key\"" "$archive" > "$archive.tmp" 2>/dev/null || : > "$archive.tmp"
+  mv -f "$archive.tmp" "$archive"
+  rm -f -- "$images/$key-appIcon" "$images/$key-image"
+}
+
+cmd_remove() {
+  ensure_store
+  local key=$1
+  [[ -n $key ]] || die "remove needs a key"
+  with_lock remove_key "$key"
+  printf '{"ok":true,"removed":%s}\n' "$(printf '%s' "$key" | jq -Rs .)"
+}
+
+clear_all() {
+  : > "$archive"
+  rm -f -- "$images"/*
+}
+
+cmd_clear() {
+  ensure_store
+  with_lock clear_all
+  printf '{"ok":true,"cleared":true}\n'
+}
+
+# When the center was last opened. Everything newer than this is what the bar
+# marks as unread, and it is a file rather than shell state because "unread"
+# has to survive a shell restart to mean anything.
+cmd_seen() {
+  ensure_store
+  if [[ $# -gt 0 && -n ${1:-} ]]; then
+    printf '%s\n' "$1" > "$seen_file"
+    printf '{"ok":true,"seen":%s}\n' "$1"
+    return
+  fi
+  printf '{"ok":true,"seen":%s}\n' "$(cat "$seen_file" 2>/dev/null || echo 0)"
+}
+
+cmd_unread() {
+  ensure_store
+  local seen
+  seen=$(cat "$seen_file" 2>/dev/null || echo 0)
+  printf '{"ok":true,"unread":%s}\n' \
+    "$(jq -s --argjson seen "${seen:-0}" '[.[] | select(.timestamp > $seen)] | length' "$archive" 2>/dev/null || echo 0)"
+}
+
+# Fills the archive with plausible-looking traffic, for working on the panel
+# without waiting for a week of real notifications to arrive.
+cmd_seed() {
+  ensure_store
+  with_lock seed_entries "${1:-25}"
+  printf '{"ok":true,"seeded":%s}\n' "${1:-25}"
+}
+
+seed_entries() {
+  local count=${1:-25} i stamp
+  local apps=("Slack" "Chromium" "Discord" "Spotify" "Thunderbird" "omarchy")
+  local summaries=("[wbsoai] from Denise" "Marjolein van Woezik" "Deploy finished" "Now playing" "3 new messages" "Theme changed")
+  local bodies=("Nee" "Ik heb wel iets vertraging al" "main → production in 4m12s" "Talk Talk — Life's What You Make It" "" "Tokyo Night")
+  for (( i = 0; i < count; i++ )); do
+    # Spread backwards over the last four days so the day grouping has
+    # something to group.
+    stamp=$(( $(now_ms) - i * 3600000 - RANDOM * 20 ))
+    jq -cn \
+      --arg key "seed-$stamp-$i" \
+      --arg app "${apps[$((i % ${#apps[@]}))]}" \
+      --arg summary "${summaries[$((i % ${#summaries[@]}))]}" \
+      --arg body "${bodies[$((i % ${#bodies[@]}))]}" \
+      --argjson timestamp "$stamp" \
+      '{key:$key, app:$app, appIcon:"", summary:$summary, body:$body,
+        image:"", glyph:"", exec:"", urgency:1, timestamp:$timestamp}' >> "$archive"
+  done
+  # Seeded entries land out of order; the archive is read newest-first off the
+  # tail, so it has to be sorted or half of them never show up.
+  jq -sc 'sort_by(.timestamp) | .[]' "$archive" > "$archive.tmp" && mv -f "$archive.tmp" "$archive"
+}
+
+case ${1:-} in
+  sync)   shift; quiet=1; cmd_sync; printf '{"ok":true,"synced":true}\n' ;;
+  watch)  shift; cmd_watch ;;
+  list)   shift; cmd_list "${1:-200}" ;;
+  remove) shift; cmd_remove "${1:-}" ;;
+  clear)  shift; cmd_clear ;;
+  seen)   shift; cmd_seen "$@" ;;
+  unread) shift; cmd_unread ;;
+  seed)   shift; cmd_seed "${1:-25}" ;;
+  prune)  shift; ensure_store; with_lock prune; printf '{"ok":true,"pruned":true}\n' ;;
+  *)
+    cat >&2 <<'USAGE'
+notification-center — the store behind the Omarchy notification center
+
+  watch              follow the notification service and archive what it receives
+  sync               catch up on anything not archived yet
+  list [LIMIT]       the archive as JSON, newest first (default 200)
+  remove KEY         drop one notification
+  clear              drop all of them
+  seen [MS]          read or set when the center was last opened
+  unread             how many arrived since then
+  seed [N]           fill the archive with test traffic
+  prune              apply the retention limits now
+USAGE
+    exit 64
+    ;;
+esac
