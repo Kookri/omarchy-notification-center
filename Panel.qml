@@ -122,6 +122,19 @@ Panel {
     onTriggered: root.now = Date.now()
   }
 
+  // The watcher is what keeps the list live, and this is what keeps the list
+  // honest: a watcher that died, or a notification that arrived in the gap
+  // between two shell restarts, would otherwise leave the panel quietly stale
+  // for as long as you left it open. Only while it is open, and free when
+  // nothing has changed, because the read above rebuilds nothing it does not
+  // have to.
+  Timer {
+    interval: 10000
+    running: root.opened
+    repeat: true
+    onTriggered: root.load()
+  }
+
   function startSearch() {
     searching = true
     Qt.callLater(function() { if (root.searching) search.forceActiveFocus() })
@@ -184,11 +197,28 @@ Panel {
           return
         }
         if (!Array.isArray(data)) return
-        root.entries = data
+        var wasLoaded = root.loaded
         root.loaded = true
+        // Rebuilding throws away the scroll position and every delegate with
+        // it, so it only happens when the answer actually differs from what is
+        // already on screen. That is what lets this run on a timer.
+        if (wasLoaded && !root.differsFrom(data)) {
+          root.entries = data
+          return
+        }
+        root.entries = data
         root.rebuild()
       }
     }
+  }
+
+  // Whether a fresh read says something the panel is not already showing.
+  // Length and the newest key between them catch everything that matters here:
+  // arrivals land at the top, removals change the count.
+  function differsFrom(data) {
+    if (data.length !== entries.length) return true
+    if (data.length === 0) return false
+    return String(data[0].key) !== String(entries[0].key)
   }
 
   function load() {
@@ -275,7 +305,17 @@ Panel {
 
     // Reading it as it lands is still reading it.
     if (root.opened) markSeen()
-    if (matches(entry)) rows.insert(0, rowFor(entry))
+    if (!matches(entry)) return
+
+    rows.insert(0, rowFor(entry))
+    // A card inserted above the scroll position is a card you never see: the
+    // list holds its offset, so the new one lands out of sight and the panel
+    // looks like it missed it. Only when you are already at the top, though,
+    // because yanking the list back up under somebody who is reading further
+    // down is worse than making them scroll.
+    if (root.opened && list.atYBeginning) Qt.callLater(function() {
+      if (root.opened) list.positionViewAtBeginning()
+    })
   }
 
   // ----------------------------------------------------------------- the list
@@ -766,6 +806,21 @@ Panel {
     function reload(): string {
       root.load()
       return "reloading"
+    }
+
+    // What the panel believes right now. For working out whether a
+    // notification reached the list, which is otherwise a question you can
+    // only answer by looking at the screen.
+    function state(): string {
+      return JSON.stringify({
+        opened: root.opened,
+        entries: root.entries.length,
+        rows: rows.count,
+        newest: root.entries.length > 0 ? root.entries[0].summary : "",
+        unread: root.unread,
+        watching: watchProc.running,
+        searching: root.searching
+      })
     }
   }
 

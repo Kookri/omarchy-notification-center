@@ -134,13 +134,26 @@ preview_source() {
 }
 
 # Take one of the service's JSON files into the archive, and print the entry
-# that was added. Prints nothing at all when there was nothing to add, which is
-# how `watch` stays quiet about the second sighting of the same notification.
+# that was added.
+#
+# The second argument is what makes two screens work. The bar runs once per
+# monitor and each copy has its own watcher, so both see the same notification
+# and both try to archive it; one takes the lock first and the other finds the
+# key already there. If that second one stayed silent, the panel on its screen
+# would never hear about the notification at all, and would sit there missing
+# it until something else made it re-read the archive. So a live watcher prints
+# the entry whether it wrote it or found it, and the panels drop the duplicate
+# by key. The catch-up sync passes 0 instead, or starting the shell would
+# replay the whole archive at both of them.
 ingest_file() {
-  local file=$1 key entry app_icon image_src exec_src icon_copy image_copy preview_src preview_copy
+  local file=$1 announce_existing=${2:-0}
+  local key entry app_icon image_src exec_src icon_copy image_copy preview_src preview_copy
   key=$(basename -- "$file"); key=${key%.json}
   [[ -n $key ]] || return 0
-  have_key "$key" && return 0
+  if have_key "$key"; then
+    (( announce_existing )) && grep -F "\"key\":\"$key\"" "$archive" | head -n 1
+    return 0
+  fi
   [[ -s $file ]] || return 0
 
   # A file caught mid-write parses as nothing; it will be caught again on the
@@ -276,7 +289,7 @@ cmd_watch() {
 }
 
 ingest_one() {
-  ingest_file "$1"
+  ingest_file "$1" 1
   prune
 }
 
