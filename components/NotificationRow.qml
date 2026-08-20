@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import qs.Commons
 import qs.Ui
@@ -296,13 +297,14 @@ Item {
       // the list scannable however tall the originals were.
       Item {
         width: parent.width
-        // The extra sliver is the gap above the picture. Kept in the height
-        // rather than as a spacer item, so a card without a picture collapses
-        // to nothing at all instead of to six pixels of nothing.
+        // Enough to see what happened and not so much that two motion alerts
+        // fill the panel. The extra sliver is the gap above the picture, kept
+        // in the height rather than as a spacer item, so a card without a
+        // picture collapses to nothing at all instead of to six pixels of
+        // nothing.
         height: root.hasPreview
-          ? Math.min(width * 9 / 16, Style.space(150)) + Style.space(6) : 0
+          ? Math.min(width * 9 / 16, Style.space(104)) + Style.space(6) : 0
         visible: root.hasPreview
-        clip: true
 
         Image {
           id: previewImage
@@ -316,6 +318,32 @@ Item {
           fillMode: Image.PreserveAspectCrop
           asynchronous: true
           smooth: true
+
+          // Square corners inside a rounded card look like a mistake, and
+          // clipping does not round: an Item clips to its bounding box and
+          // ignores the radius. So the picture is drawn through a mask shaped
+          // like the corner it should have. The threshold and spread are what
+          // give that edge its antialiasing; without them the curve comes out
+          // as a staircase.
+          layer.enabled: true
+          layer.effect: MultiEffect {
+            maskEnabled: true
+            maskSource: previewMask
+            maskThresholdMin: 0.5
+            maskSpreadAtMin: 1.0
+          }
+        }
+
+        // The shape, never drawn itself: MultiEffect reads its alpha and
+        // nothing else.
+        Rectangle {
+          id: previewMask
+          anchors.fill: previewImage
+          radius: Style.space(8)
+          color: "black"
+          visible: false
+          layer.enabled: true
+          layer.smooth: true
         }
       }
     }

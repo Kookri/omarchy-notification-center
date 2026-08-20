@@ -347,13 +347,33 @@ cmd_seed() {
   printf '{"ok":true,"seeded":%s}\n' "${1:-25}"
 }
 
-# app | icon name | summary | body | how many minutes ago
+# A picture for the seeded entries that have one. Any wallpaper will do: the
+# point is a card with a real photograph on it, so the layout is exercised and
+# a screenshot of the panel shows what a motion alert or a screenshot toast
+# actually looks like. Falls back to no picture at all when the themes are
+# somewhere else.
+seed_sample_image() {
+  local candidate
+  for candidate in \
+    "$HOME/.config/omarchy/current/theme/backgrounds"/* \
+    "${OMARCHY_PATH:-/usr/share/omarchy}/themes"/*/backgrounds/*; do
+    [[ -f $candidate ]] || continue
+    case $candidate in
+      *.png|*.jpg|*.jpeg|*.webp) printf '%s' "$candidate"; return ;;
+    esac
+  done
+  printf '%s' ""
+}
+
+# app | icon name | summary | body | how many minutes ago | picture (1/0)
 readonly SEED_ROWS=(
+  "omasnap||Screenshot saved and copied|Click to edit|2|1"
+  "Camera||Motion at the back door|17:41|9|1"
   "Slack|slack|#design from Mara|Pushed the new empty state, have a look when you get a minute|4"
   "Spotify|spotify|Talk Talk|Life's What You Make It|12"
   "Chromium|chromium|Calendar|Standup starts in 10 minutes|38"
   "Signal|signal-desktop|Jules|Are we still on for Thursday?|55"
-  "omarchy||Screenshot saved and copied|Click to edit|96"
+  "omarchy||Reminder|Stand up and walk about|96"
   "Slack|slack|#ops from Ilse|Deploy 4f21c9 is live on production|140"
   "Thunderbird|thunderbird|Invoice paid|Nova Systems paid invoice 2026-114|190"
   "Discord|discord|#homelab from bram|that fan curve fixed it, 12 degrees cooler|260"
@@ -376,25 +396,31 @@ readonly SEED_ROWS=(
 )
 
 seed_entries() {
-  local count=${1:-25} i row stamp
-  local app icon summary body minutes
+  local count=${1:-25} i row stamp key
+  local app icon summary body minutes wants_picture preview sample
   local total=${#SEED_ROWS[@]}
+  sample=$(seed_sample_image)
   for (( i = 0; i < count; i++ )); do
     row=${SEED_ROWS[$((i % total))]}
-    IFS='|' read -r app icon summary body minutes <<< "$row"
+    IFS='|' read -r app icon summary body minutes wants_picture <<< "$row"
     # Past one lap through the list the same entries come round again, pushed
     # another two days back so they land on their own day rather than on top of
     # the ones they are copies of.
     stamp=$(( $(now_ms) - (minutes + (i / total) * 2880) * 60000 ))
+    key="seed-$stamp-$i"
+    preview=""
+    [[ ${wants_picture:-0} == 1 && -n $sample ]] && preview=$(copy_image "$sample" "$key" "preview")
     jq -cn \
-      --arg key "seed-$stamp-$i" \
+      --arg key "$key" \
       --arg app "$app" \
       --arg appIcon "$icon" \
       --arg summary "$summary" \
       --arg body "$body" \
+      --arg preview "$preview" \
       --argjson timestamp "$stamp" \
       '{key:$key, app:$app, appIcon:$appIcon, summary:$summary, body:$body,
-        image:"", glyph:"", exec:"", urgency:1, timestamp:$timestamp}' >> "$archive"
+        image:"", preview:$preview, glyph:"", exec:"", urgency:1,
+        timestamp:$timestamp}' >> "$archive"
   done
   # Seeded entries land out of order; the archive is read newest-first off the
   # tail, so it has to be sorted or half of them never show up.
