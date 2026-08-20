@@ -62,6 +62,13 @@ arrived on: *Today*, *Yesterday*, then the weekday for the rest of the week and
 the date beyond it. Each card carries the app's own icon, what it said, and how
 long ago: minutes while that is still the useful answer, then the clock.
 
+- **A picture, when there was one.** A camera catching movement and a
+  screenshot tool taking a shot both hand their file to the notification's
+  action rather than setting an image on it, so the panel reads the path out of
+  there and keeps a copy of its own, scaled down to the width it is shown at.
+  Wide rather than a thumbnail in the corner: a motion alert is entirely about
+  what is in the frame, and at thumbnail size the answer to "what set it off"
+  is still "go and open it".
 - **Clicking a card** does what the notification itself asked for. A screenshot
   toast still opens its screenshot a week later; a chat notification, which
   almost never registers an action, focuses the app that sent it. That is the
@@ -89,6 +96,7 @@ ones were new when you opened it.
 | Keep at most | 1000 | A ceiling regardless of age. Whichever limit is hit first wins. |
 | Clicking a notification | Auto | `Auto` runs what the notification asked for and falls back to focusing the app; `Focus the app` never runs a stored command; `Nothing` makes the list read-only. |
 | Show the message text | on | Off leaves the sender and subject only, the version to run on a screen other people can see. |
+| Show pictures | on | Off keeps the text and leaves the picture where it was. New notifications stop being copied as well, so it is a storage setting as much as a display one. |
 | Panel width | 420 | In the shell's spacing units. |
 | List height | 480 | How tall the list grows before it scrolls. |
 
@@ -97,7 +105,7 @@ ones were new when you opened it.
 ```
 ~/.local/state/omarchy-notification-center/
   archive.jsonl      one notification per line, oldest first
-  images/            a copy of each icon, named after its notification
+  images/            a copy of each icon and picture, named after its notification
   seen               when the center was last opened
 ```
 
@@ -135,6 +143,9 @@ unread             how many arrived since then
 seed [N]           fill the archive with test traffic
 prune              apply the retention limits now
 ```
+
+`backfill` is worth one run after an upgrade: entries archived before pictures
+were kept get theirs now, as long as the file they point at is still on disk.
 
 Everything prints JSON, so nothing that goes wrong reaches the panel as a parse
 error.

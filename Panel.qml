@@ -50,6 +50,7 @@ Panel {
   readonly property int maxItems: setting("maxItems", 1000)
   readonly property string clickAction: setting("clickAction", "Auto")
   readonly property bool showBody: setting("showBody", true)
+  readonly property bool showPreview: setting("showPreview", true)
 
   // How many the panel holds in memory. The archive can be far longer; this is
   // how far back the list scrolls before it stops, and it is a list you scan
@@ -143,7 +144,8 @@ Panel {
   // travel with every call rather than living in a config file of their own.
   readonly property var storeEnvironment: ({
     "NC_KEEP_DAYS": String(root.keepDays),
-    "NC_MAX_ITEMS": String(root.maxItems)
+    "NC_MAX_ITEMS": String(root.maxItems),
+    "NC_PREVIEWS": root.showPreview ? "1" : "0"
   })
 
   // The one long-running process: it follows the notification directories and
@@ -296,6 +298,7 @@ Panel {
       summary: String(entry.summary || ""),
       body: String(entry.body || ""),
       image: String(entry.image || ""),
+      preview: String(entry.preview || ""),
       glyph: String(entry.glyph || ""),
       exec: String(entry.exec || ""),
       urgency: Number(entry.urgency || 0),
@@ -684,12 +687,14 @@ Panel {
             summary: model.summary
             body: model.body
             image: model.image
+            preview: model.preview
             glyph: model.glyph
             timestamp: model.timestamp
             now: root.now
             urgency: model.urgency
             unread: model.timestamp > root.readMark
             showBody: root.showBody
+            showPreview: root.showPreview
             foreground: root.foreground
             fontFamily: root.fontFamily
 

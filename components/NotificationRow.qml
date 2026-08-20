@@ -22,6 +22,9 @@ Item {
   property string summary: ""
   property string body: ""
   property string image: ""
+  // The picture the notification is about, as opposed to the icon of whatever
+  // sent it: the frame a camera caught, the screenshot that was just taken.
+  property string preview: ""
   property string glyph: ""
   property double timestamp: 0
   // Ticked by the panel so "3m" ages on screen instead of freezing at whatever
@@ -29,6 +32,7 @@ Item {
   property double now: 0
   property int urgency: 1
   property bool showBody: true
+  property bool showPreview: true
   property bool unread: false
 
   property color foreground: Color.foreground
@@ -43,6 +47,7 @@ Item {
   readonly property string iconSource: image !== "" ? resolve(image) : resolve(appIcon)
   readonly property bool hasIcon: iconSource !== "" && icon.status !== Image.Error
   readonly property string initial: app === "" ? "?" : app.charAt(0).toUpperCase()
+  readonly property bool hasPreview: showPreview && preview !== "" && previewImage.status !== Image.Error
 
   // The body arrives as notification markup: a subset of HTML, plus whatever
   // the sender felt like putting in. Images are stripped rather than rendered,
@@ -282,6 +287,36 @@ Item {
         font.pixelSize: Style.font.caption
         color: root.foreground
         opacity: 0.75
+      }
+
+      // The picture, when the notification came with one. Wide rather than a
+      // thumbnail in the corner: a motion alert is entirely about what is in
+      // the frame, and at thumbnail size the answer to "what set it off" is
+      // still "go and open it". Cropped to a letterbox so a run of them keeps
+      // the list scannable however tall the originals were.
+      Item {
+        width: parent.width
+        // The extra sliver is the gap above the picture. Kept in the height
+        // rather than as a spacer item, so a card without a picture collapses
+        // to nothing at all instead of to six pixels of nothing.
+        height: root.hasPreview
+          ? Math.min(width * 9 / 16, Style.space(150)) + Style.space(6) : 0
+        visible: root.hasPreview
+        clip: true
+
+        Image {
+          id: previewImage
+          anchors.fill: parent
+          anchors.topMargin: Style.space(6)
+          source: root.showPreview ? root.preview : ""
+          // Decoded at the size it is drawn at, twice over for a HiDPI screen.
+          // A list of camera frames decoded at their original size is a list
+          // that costs tens of megabytes to scroll.
+          sourceSize.width: Math.round(width * 2)
+          fillMode: Image.PreserveAspectCrop
+          asynchronous: true
+          smooth: true
+        }
       }
     }
 
