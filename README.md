@@ -57,7 +57,9 @@ icon and all, and keeps it for 30 days.
 ## Where things are kept
 
 `~/.local/state/omarchy-notification-center/`, one line of JSON per
-notification plus a copy of every icon and picture.
+notification plus a copy of every icon and picture. The directory is `0700`
+and the archive `0600`, and only files that are actually images are copied
+into it.
 
 Worth knowing for one reason: **that is every notification you have been sent**,
 chat messages and two-factor codes included. It never leaves the machine, but

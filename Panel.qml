@@ -392,7 +392,11 @@ Panel {
       root.close()
       return
     }
-    if (row.app === "") return
+    // The app name is on the notification too, so it is the sender's to choose,
+    // and the focus helper matches it as a regular expression: an app calling
+    // itself ".*" would focus whichever window that hit first. Only something
+    // shaped like a name gets through.
+    if (!/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/.test(row.app)) return
     // Chat apps rarely register an action and simply expect a click to bring
     // their window up. This is the helper the notification service uses for
     // the same fallback, so a click here lands where a click on the toast
