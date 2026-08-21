@@ -510,6 +510,7 @@ Panel {
     color: Color.accent
 
     Text {
+      textFormat: Text.PlainText
       id: countText
       anchors.centerIn: parent
       // Past ninety-nine the number has stopped being information and the
@@ -755,6 +756,7 @@ Panel {
         // --------------------------------------------------------- empty
 
         Text {
+          textFormat: Text.PlainText
           width: parent.width
           visible: rows.count === 0
           horizontalAlignment: Text.AlignHCenter
@@ -773,6 +775,7 @@ Panel {
         // ---------------------------------------------------------- foot
 
         Text {
+          textFormat: Text.PlainText
           id: foot
           width: parent.width
           visible: root.entries.length > 0 && root.filter === ""

@@ -60,6 +60,20 @@ Item {
     .replace(/\s+/g, " ")
     .trim()
 
+  // The summary gets the same treatment as the body, and for a sharper reason:
+  // a notification's text is chosen by whoever sent it, and anything on this
+  // machine can send one. Qt reads a string that looks like markup as rich
+  // text unless told otherwise, and rich text fetches `<img src="http://...">`
+  // for real — a request out of the shell process, to a host of the sender's
+  // choosing, the moment the row is drawn. Every Text below is pinned to
+  // PlainText; stripping the tags as well is what keeps `<b>` from showing up
+  // as four visible characters.
+  readonly property string cleanSummary: String(summary || "")
+    .replace(/<img[^>]*>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
   // Recent things get a duration, older things get a clock. "4m ago" is how
   // you think about something that just happened; "16:04" is how you think
   // about something from this morning, and the day it happened on is already
@@ -150,6 +164,7 @@ Item {
       // ever saying what they are. Still tells two senders apart at a glance,
       // which is all the icon was doing.
       Text {
+        textFormat: Text.PlainText
         anchors.centerIn: parent
         visible: !root.hasIcon && root.glyph === ""
         text: root.initial
@@ -161,6 +176,7 @@ Item {
       }
 
       Text {
+        textFormat: Text.PlainText
         anchors.centerIn: parent
         visible: !root.hasIcon && root.glyph !== ""
         text: root.glyph
@@ -202,6 +218,7 @@ Item {
         height: appLabel.implicitHeight
 
         Text {
+          textFormat: Text.PlainText
           id: appLabel
           anchors.left: parent.left
           width: parent.width - whenLabel.implicitWidth - Style.space(20)
@@ -217,6 +234,7 @@ Item {
         // They never coexist, so neither has to make room for the other, and
         // the corner stays quiet until you reach for it.
         Text {
+          textFormat: Text.PlainText
           id: whenLabel
           anchors.right: parent.right
           visible: !root.hovered
@@ -240,6 +258,7 @@ Item {
                          dismissMouse.containsMouse ? 0.25 : 0.15)
 
           Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             // A multiplication sign, not the letter x and not a Nerd Font
             // glyph: it is in every font, at every size, and it is the shape
@@ -263,9 +282,10 @@ Item {
       }
 
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         visible: root.summary !== ""
-        text: root.summary
+        text: root.cleanSummary
         elide: Text.ElideRight
         maximumLineCount: 1
         font.family: root.fontFamily
@@ -278,6 +298,7 @@ Item {
       // need to go and open the thing, short enough that one chatty app cannot
       // push a day of notifications off the bottom of the panel.
       Text {
+        textFormat: Text.PlainText
         width: parent.width
         visible: root.showBody && root.cleanBody !== ""
         text: root.cleanBody
