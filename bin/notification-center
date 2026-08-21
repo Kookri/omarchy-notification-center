@@ -127,8 +127,17 @@ copy_image() {
 # instead, so clicking the toast opens it. That path is the only place the
 # picture is named, so this is where a motion alert gets its thumbnail.
 #
-# Quoted or bare, file:// or not, and it has to look like an image: the same
-# field also carries commands with no picture in them at all.
+# This is also the allowlist for what a click on an archived notification is
+# allowed to open, and the reason it is this narrow. The action a notification
+# arrives with is a shell command chosen by whoever sent the notification, and
+# anything on the machine can send one. Keeping that string and running it
+# later is handing an attacker a command that fires whenever somebody clicks a
+# row, so it is never kept. What is kept is at most an absolute path to an
+# image, taken out of the command and opened by argument rather than by shell.
+#
+# Absolute, no quotes, no spaces, no newlines, and an image extension: a path
+# that survives this is one that cannot become an option, a second command, or
+# a .desktop file that runs on open.
 preview_source() {
   printf '%s' "$1" | grep -oiE "(file://)?/[^\"' ]*\.(jpe?g|png|webp|gif)" | head -n 1
 }
@@ -147,7 +156,7 @@ preview_source() {
 # replay the whole archive at both of them.
 ingest_file() {
   local file=$1 announce_existing=${2:-0}
-  local key entry app_icon image_src exec_src icon_copy image_copy preview_src preview_copy
+  local key entry app_icon image_src exec_src icon_copy image_copy file_src preview_copy
   key=$(basename -- "$file"); key=${key%.json}
   [[ -n $key ]] || return 0
   if have_key "$key"; then
@@ -169,10 +178,15 @@ ingest_file() {
   is_path "$app_icon" && icon_copy=$(copy_image "$app_icon" "$key" "appIcon")
   is_path "$image_src" && image_copy=$(copy_image "$image_src" "$key" "image")
 
+  # The path the action pointed at, if it pointed at an image. This is what a
+  # click opens; the command it came out of is discarded here and never
+  # reaches the archive.
+  file_src=$(preview_source "$exec_src")
+  file_src=${file_src#file://}
+
   preview_copy=""
-  if (( previews )); then
-    preview_src=$(preview_source "$exec_src")
-    [[ -n $preview_src ]] && preview_copy=$(copy_image "$preview_src" "$key" "preview")
+  if (( previews )) && [[ -n $file_src ]]; then
+    preview_copy=$(copy_image "$file_src" "$key" "preview")
   fi
 
   entry=$(jq -c \
@@ -180,6 +194,7 @@ ingest_file() {
     --arg appIcon "$icon_copy" \
     --arg image "$image_copy" \
     --arg preview "$preview_copy" \
+    --arg file "$file_src" \
     '{
        key: $key,
        app: (.app // ""),
@@ -188,8 +203,8 @@ ingest_file() {
        body: (.body // ""),
        image: $image,
        preview: $preview,
+       file: $file,
        glyph: (.glyph // ""),
-       exec: (.exec // ""),
        urgency: (.urgency // 1),
        timestamp: (.timestamp // 0)
      }
@@ -257,7 +272,17 @@ sync_and_prune() {
 
 cmd_sync() {
   ensure_store
+  with_lock disarm_archive
   with_lock sync_and_prune
+}
+
+# An archive written before stored actions were removed still holds them. That
+# is a command an attacker picked, sitting in a file, waiting for a click, so
+# it is not something to leave until somebody thinks to run a migration: every
+# sync clears it, and once cleared the grep costs nothing.
+disarm_archive() {
+  grep -q '"exec":' "$archive" 2>/dev/null || return 0
+  backfill_previews >/dev/null
 }
 
 cmd_watch() {
@@ -432,7 +457,7 @@ seed_entries() {
       --arg preview "$preview" \
       --argjson timestamp "$stamp" \
       '{key:$key, app:$app, appIcon:$appIcon, summary:$summary, body:$body,
-        image:"", preview:$preview, glyph:"", exec:"", urgency:1,
+        image:"", preview:$preview, file:"", glyph:"", urgency:1,
         timestamp:$timestamp}' >> "$archive"
   done
   # Seeded entries land out of order; the archive is read newest-first off the
@@ -440,29 +465,40 @@ seed_entries() {
   jq -sc 'sort_by(.timestamp) | .[]' "$archive" > "$archive.tmp" && mv -f "$archive.tmp" "$archive"
 }
 
-# Notifications archived before previews existed, or before their picture was
-# reachable, get one now if the file they point at is still on disk. Everything
-# else is left exactly as it is.
+# Two jobs over the existing archive, both idempotent, both safe to run twice.
+#
+# The first is the important one: an archive written by an older version still
+# holds `exec`, the sender-chosen shell command the notification arrived with.
+# Those are stripped, and the image path is lifted out of them first, so
+# nothing is lost except the ability to run a stranger's command.
+#
+# The second is the ordinary one: entries that never had a picture get one now
+# if the file they name is still on disk.
 backfill_previews() {
-  local tmp="$archive.backfill" line key exec_src preview_src preview_copy filled=0
+  local tmp="$archive.backfill" line key exec_src file_src preview_copy filled=0
   : > "$tmp"
   while IFS= read -r line; do
     [[ -n $line ]] || continue
     key=$(printf '%s' "$line" | jq -r '.key // ""')
-    if [[ -z $key ]] || [[ -n $(printf '%s' "$line" | jq -r '.preview // ""') ]]; then
-      printf '%s\n' "$line" >> "$tmp"
-      continue
+    [[ -n $key ]] || { printf '%s\n' "$line" >> "$tmp"; continue; }
+
+    file_src=$(printf '%s' "$line" | jq -r '.file // ""')
+    if [[ -z $file_src ]]; then
+      exec_src=$(printf '%s' "$line" | jq -r '.exec // ""')
+      file_src=$(preview_source "$exec_src")
+      file_src=${file_src#file://}
     fi
-    exec_src=$(printf '%s' "$line" | jq -r '.exec // ""')
-    preview_src=$(preview_source "$exec_src")
-    preview_copy=""
-    [[ -n $preview_src ]] && preview_copy=$(copy_image "$preview_src" "$key" "preview")
-    if [[ -n $preview_copy ]]; then
-      printf '%s' "$line" | jq -c --arg preview "$preview_copy" '. + {preview: $preview}' >> "$tmp"
-      filled=$(( filled + 1 ))
-    else
-      printf '%s\n' "$line" >> "$tmp"
+
+    preview_copy=$(printf '%s' "$line" | jq -r '.preview // ""')
+    if [[ -z $preview_copy && -n $file_src ]] && (( previews )); then
+      preview_copy=$(copy_image "$file_src" "$key" "preview")
+      [[ -n $preview_copy ]] && filled=$(( filled + 1 ))
     fi
+
+    printf '%s' "$line" | jq -c \
+      --arg file "$file_src" \
+      --arg preview "$preview_copy" \
+      'del(.exec) + {file: $file, preview: $preview}' >> "$tmp"
   done < "$archive"
   mv -f "$tmp" "$archive"
   printf '%s' "$filled"

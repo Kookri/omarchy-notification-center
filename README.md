@@ -26,12 +26,14 @@ then keeps only the last ten. This copies each one out of there as it lands,
 icon and all, and keeps it for 30 days.
 
 - One card per notification, newest first, under the day it arrived on.
-- **Clicking a card** does what the notification asked for, so a screenshot
-  toast still opens its screenshot a week later, and otherwise focuses the app
-  that sent it.
 - **A picture** when there was one. Cameras and screenshot tools hand their
   file to the notification's action rather than setting an image on it, so the
   path is read out of there and a scaled copy is kept.
+- **Clicking a card** opens that picture, or focuses the app that sent the
+  notification. It never runs the command the notification arrived with: that
+  command is chosen by whoever sent the notification, so a stored one would be
+  an attacker's command waiting for a click. Only an absolute path to an image
+  is kept, and it is opened by argument rather than through a shell.
 - **The × on a card**, or a right-click, removes one. **Clear** empties the
   archive and asks twice.
 - **The bell in the header** is Do Not Disturb, the same switch as the bar's.
@@ -46,7 +48,7 @@ icon and all, and keeps it for 30 days.
 | Mark what you have not read | Dot | `Dot`, `Count` or `None` on the bell. |
 | Keep notifications for | 30 days | Older than this is deleted, icon and all. |
 | Keep at most | 1000 | A ceiling regardless of age. |
-| Clicking a notification | Auto | Or never run a stored command, or nothing at all. |
+| Clicking a notification | Auto | Opens the picture, or focuses the app. Or neither. |
 | Show the message text | on | Off leaves the sender and subject only. |
 | Show pictures | on | Off stops keeping copies as well. |
 | Panel width | 420 | In the shell's spacing units. |
