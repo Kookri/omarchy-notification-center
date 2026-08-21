@@ -39,6 +39,8 @@ archive="$store/archive.jsonl"
 images="$store/images"
 seen_file="$store/seen"
 lock_file="$store/lock"
+dismissed_file="$store/dismissed"
+cleared_at_file="$store/cleared_at"
 
 # How much is kept. Both are ceilings and the tighter one wins: 30 days of a
 # quiet week is a shorter list than 1000 notifications, and 1000 notifications
@@ -71,16 +73,36 @@ with_lock() {
 ensure_store() {
   mkdir -p "$store" "$images" || die "cannot create $store"
   [[ -f $archive ]] || : > "$archive"
+  [[ -f $dismissed_file ]] || : > "$dismissed_file"
   # Installs that predate the umask above created these 755 and 644, which on a
   # machine with a second account hands over every notification you have had
   # for the reading. Cheap enough to reassert on every call.
   chmod 700 "$store" "$images" 2>/dev/null || true
-  chmod 600 "$archive" 2>/dev/null || true
+  chmod 600 "$archive" "$dismissed_file" "$seen_file" "$cleared_at_file" 2>/dev/null || true
 }
 
 now_ms() { printf '%s' "$(($(date +%s%N) / 1000000))"; }
 
 # ---------------------------------------------------------------- ingesting
+
+is_dismissed() {
+  local key=$1
+  [[ -n $key ]] || return 1
+  if [[ -s $dismissed_file ]] && grep -qxF "$key" "$dismissed_file" 2>/dev/null; then
+    return 0
+  fi
+  if [[ -s $cleared_at_file ]]; then
+    local cleared_at stamp
+    cleared_at=$(cat "$cleared_at_file" 2>/dev/null || echo 0)
+    if [[ $cleared_at =~ ^[0-9]+$ ]] && (( cleared_at > 0 )); then
+      stamp=${key%%-*}
+      if [[ $stamp =~ ^[0-9]+$ ]] && (( stamp <= cleared_at )); then
+        return 0
+      fi
+    fi
+  fi
+  return 1
+}
 
 # Whether this notification is already in the archive. Keys are the service's
 # own file names ("1787227796695-32"): a millisecond stamp and the notification
@@ -178,6 +200,9 @@ ingest_file() {
   local key entry app_icon image_src exec_src icon_copy image_copy file_src preview_copy
   key=$(basename -- "$file"); key=${key%.json}
   [[ -n $key ]] || return 0
+  if is_dismissed "$key"; then
+    return 0
+  fi
   if have_key "$key"; then
     (( announce_existing )) && grep -F "\"key\":\"$key\"" "$archive" | head -n 1
     return 0
@@ -187,6 +212,17 @@ ingest_file() {
   # A file caught mid-write parses as nothing; it will be caught again on the
   # move into history, or by the next sync.
   jq -e . "$file" >/dev/null 2>&1 || return 0
+
+  if [[ -s $cleared_at_file ]]; then
+    local cleared_at file_stamp
+    cleared_at=$(cat "$cleared_at_file" 2>/dev/null || echo 0)
+    if [[ $cleared_at =~ ^[0-9]+$ ]] && (( cleared_at > 0 )); then
+      file_stamp=$(jq -r '(.timestamp // 0) | tonumber?' "$file" 2>/dev/null || echo 0)
+      if [[ $file_stamp =~ ^[0-9]+$ ]] && (( file_stamp > 0 && file_stamp <= cleared_at )); then
+        return 0
+      fi
+    fi
+  fi
 
   app_icon=$(jq -r '.appIcon // ""' "$file")
   image_src=$(jq -r '.image // ""' "$file")
@@ -256,6 +292,19 @@ sync_all() {
 prune() {
   local cutoff kept dropped
   cutoff=$(( $(now_ms) - keep_days * 86400000 ))
+
+  if [[ -s $cleared_at_file ]]; then
+    local cleared_at
+    cleared_at=$(cat "$cleared_at_file" 2>/dev/null || echo 0)
+    if [[ $cleared_at =~ ^[0-9]+$ ]] && (( cleared_at < cutoff )); then
+      rm -f -- "$cleared_at_file"
+    fi
+  fi
+
+  if [[ -s $dismissed_file ]]; then
+    tail -n 2000 "$dismissed_file" > "$dismissed_file.tmp" 2>/dev/null && mv -f "$dismissed_file.tmp" "$dismissed_file"
+  fi
+
   [[ -s $archive ]] || return 0
 
   kept=$(jq -c --argjson cutoff "$cutoff" 'select(.timestamp >= $cutoff)' "$archive" 2>/dev/null | tail -n "$max_items")
@@ -346,9 +395,12 @@ cmd_list() {
 
 remove_key() {
   local key=$1
+  [[ -n $key ]] || return 0
+  printf '%s\n' "$key" >> "$dismissed_file"
   grep -vF "\"key\":\"$key\"" "$archive" > "$archive.tmp" 2>/dev/null || : > "$archive.tmp"
   mv -f "$archive.tmp" "$archive"
   rm -f -- "$images/$key-appIcon" "$images/$key-image" "$images/$key-preview"
+  rm -f -- "$src_history/$key.json"
 }
 
 cmd_remove() {
@@ -360,8 +412,14 @@ cmd_remove() {
 }
 
 clear_all() {
+  now_ms > "$cleared_at_file"
   : > "$archive"
+  : > "$dismissed_file"
   rm -f -- "$images"/*
+  for f in "$src_history"/*.json; do
+    [[ -e $f ]] || continue
+    rm -f -- "$f"
+  done
 }
 
 cmd_clear() {
@@ -400,6 +458,8 @@ cmd_unread() {
 # resolve out of the icon theme the way they do for the real thing.
 cmd_seed() {
   ensure_store
+  rm -f -- "$cleared_at_file"
+  : > "$dismissed_file"
   with_lock seed_entries "${1:-25}"
   printf '{"ok":true,"seeded":%s}\n' "${1:-25}"
 }

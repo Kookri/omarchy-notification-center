@@ -280,9 +280,7 @@ Panel {
   function clearAll() {
     entries = []
     rebuild()
-    if (clearProc.running) return
-    clearProc.command = root.storeCommand(["clear"])
-    clearProc.running = true
+    Quickshell.execDetached(root.storeCommand(["clear"]))
   }
 
   // A notification that has just been archived, straight off the watcher.
