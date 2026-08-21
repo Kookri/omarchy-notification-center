@@ -7,7 +7,7 @@ in, and a panel of everything you were told, still there tomorrow.
 Omarchy shows a notification once. This answers the question that comes ten
 minutes later, in the middle of something else: *what did that say?*
 
-<img src="screenshots/desktop.png" alt="The notification center open on the right of the screen, a column of cards under Today and Yesterday" width="720">
+<img src="preview.png" alt="The notification center open on the right of the screen, a column of cards under Today and Yesterday" width="720">
 
 ## Install
 
