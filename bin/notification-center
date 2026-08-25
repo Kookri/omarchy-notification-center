@@ -148,17 +148,36 @@ copy_image() {
 #
 # This is also the allowlist for what a click on an archived notification is
 # allowed to open, and the reason it is this narrow. The action a notification
-# arrives with is a shell command chosen by whoever sent the notification, and
-# anything on the machine can send one. Keeping that string and running it
-# later is handing an attacker a command that fires whenever somebody clicks a
-# row, so it is never kept. What is kept is at most an absolute path to an
-# image, taken out of the command and opened by argument rather than by shell.
+# arrives with is chosen by whoever sent the notification, and anything on the
+# machine can send one. Keeping that action and running it later is handing an
+# attacker a command that fires whenever somebody clicks a row, so it is never
+# kept. What is kept is at most an absolute path to an image, taken out of the
+# action and opened by argument rather than by shell.
 #
-# Absolute, no quotes, no spaces, no newlines, and an image extension: a path
-# that survives this is one that cannot become an option, a second command, or
-# a .desktop file that runs on open.
+# Two shapes arrive here. Omarchy now sends the action as `omarchy-exec-argv`,
+# a JSON vector whose elements are already discrete arguments, so a candidate
+# is one whole element and a space in a filename is just a space. Older toasts,
+# and anything still in the archive from before, carry `omarchy-exec`: one
+# shell string, where a space is a separator and a path containing one cannot
+# be told apart from two arguments. That is why the string branch refuses
+# spaces and the vector branch does not.
+#
+# Either way: absolute, no quotes, no newlines, and an image extension. A path
+# that survives this cannot become an option, a second command, or a .desktop
+# file that runs on open.
 preview_source() {
-  printf '%s' "$1" | grep -oiE "(file://)?/[^\"' ]*\.(jpe?g|png|webp|gif)" | head -n 1
+  local action=$1
+
+  if [[ $action == \[* ]]; then
+    printf '%s' "$action" | jq -r --arg re '^(file://)?/[^"'"'"'\r\n]*\.(jpe?g|png|webp|gif)$' '
+      if type == "array" then
+        .[] | select(type == "string") | select(test($re; "i"))
+      else empty end
+    ' 2>/dev/null | head -n 1
+    return
+  fi
+
+  printf '%s' "$action" | grep -oiE "(file://)?/[^\"' ]*\.(jpe?g|png|webp|gif)" | head -n 1
 }
 
 # Take one of the service's JSON files into the archive, and print the entry
@@ -190,7 +209,8 @@ ingest_file() {
 
   app_icon=$(jq -r '.appIcon // ""' "$file")
   image_src=$(jq -r '.image // ""' "$file")
-  exec_src=$(jq -r '.exec // ""' "$file")
+  # execArgv is what the service writes now; exec is what it wrote before.
+  exec_src=$(jq -r '.execArgv // .exec // ""' "$file")
 
   icon_copy=$app_icon
   image_copy=$image_src
