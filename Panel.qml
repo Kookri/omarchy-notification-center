@@ -32,10 +32,6 @@ Panel {
   moduleName: "jankeesvw.notification-center"
   ipcTarget: "jankeesvw.notification-center"
 
-  // The store sits next to this file, so the plugin runs from wherever it was
-  // installed without putting anything on $PATH.
-  readonly property string script:
-    Qt.resolvedUrl("bin/notification-center").toString().replace(/^file:\/\//, "")
   readonly property string omarchyPath: Quickshell.env("OMARCHY_PATH")
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -51,12 +47,6 @@ Panel {
   readonly property string clickAction: setting("clickAction", "Auto")
   readonly property bool showBody: setting("showBody", true)
   readonly property bool showPreview: setting("showPreview", true)
-
-  // How many the panel holds in memory. The archive can be far longer; this is
-  // how far back the list scrolls before it stops, and it is a list you scan
-  // rather than page through. Anything older is still on disk and still
-  // searchable from the command line.
-  readonly property int pageSize: 500
 
   // ------------------------------------------------------------- the service
   //
@@ -80,39 +70,68 @@ Panel {
     if (notificationService) notificationService.setDoNotDisturb(!notificationService.doNotDisturb)
   }
 
+  // ------------------------------------------------------------- the store
+  //
+  // The archive is a shell service, not a child of this widget. Omarchy
+  // builds a bar per monitor, and a Process in here would be one watcher
+  // per screen: unread and clear would stick to whichever copy you clicked.
+  property var store: null
+
+  function bindStore() {
+    if (store) {
+      pushSettings()
+      return
+    }
+    var host = bar && bar.shell ? bar.shell : null
+    if (!host || typeof host.serviceFor !== "function") return
+    var s = host.serviceFor("jankeesvw.notification-center")
+    if (!s) return
+    store = s
+    pushSettings()
+    rebuild()
+  }
+
+  function pushSettings() {
+    if (!store) return
+    store.keepDays = keepDays
+    store.maxItems = maxItems
+    store.showPreview = showPreview
+  }
+
+  onBarChanged: bindStore()
+  onKeepDaysChanged: pushSettings()
+  onMaxItemsChanged: pushSettings()
+  onShowPreviewChanged: pushSettings()
+
+  Timer {
+    interval: 200
+    running: root.store === null
+    repeat: true
+    onTriggered: root.bindStore()
+  }
+
+  Connections {
+    target: root.store
+    function onEntryAdded(entry) { root.handleEntryAdded(entry) }
+    function onEntriesReset() { root.rebuild() }
+  }
+
   // -------------------------------------------------------------------- state
 
-  // Newest first, which is both the order they are read in and the order the
-  // store hands them over.
-  property var entries: []
+  readonly property var entries: store ? store.entries : []
   property string filter: ""
-  // When the center was last opened. Everything newer is unread, and it is the
-  // store that remembers it: unread has to survive a shell restart or the
-  // count resets itself every time you change a theme.
-  property double lastSeen: 0
   // What the rows are marked against. Opening the center makes everything in
   // it read, so marking against `lastSeen` would mean the list never once
   // shows you which of these you had not seen, because the marks would be gone by the
   // time it finished drawing. This holds the reading from the moment before
   // you opened it, which is the question you were asking.
   property double readMark: 0
-  property bool loaded: false
-  // Whether the search field is up and holding the keyboard. Off by default,
-  // and off again the moment the panel closes.
+  readonly property bool loaded: store ? store.loaded : false
   property bool searching: false
-  // Ticks so "4m ago" ages on screen instead of freezing at whatever it said
-  // when the panel opened. Only while the panel is open: nothing behind a
-  // closed panel is being read.
   property double now: Date.now()
 
-  readonly property int unread: {
-    var count = 0
-    for (var i = 0; i < entries.length; i++) {
-      if (entries[i].timestamp > lastSeen) count++
-      else break   // newest first, so the first read one ends it
-    }
-    return count
-  }
+  readonly property int unread: store ? store.unread : 0
+  readonly property double lastSeen: store ? store.lastSeen : 0
 
   Timer {
     interval: 30000
@@ -120,19 +139,6 @@ Panel {
     repeat: true
     triggeredOnStart: true
     onTriggered: root.now = Date.now()
-  }
-
-  // The watcher is what keeps the list live, and this is what keeps the list
-  // honest: a watcher that died, or a notification that arrived in the gap
-  // between two shell restarts, would otherwise leave the panel quietly stale
-  // for as long as you left it open. Only while it is open, and free when
-  // nothing has changed, because the read above rebuilds nothing it does not
-  // have to.
-  Timer {
-    interval: 10000
-    running: root.opened
-    repeat: true
-    onTriggered: root.load()
   }
 
   function startSearch() {
@@ -147,172 +153,21 @@ Panel {
     Qt.callLater(function() { if (root.opened) keyCatcher.forceActiveFocus() })
   }
 
-  // ------------------------------------------------------------------- store
-
-  function storeCommand(args) {
-    return [root.script].concat(args)
-  }
-
-  // Retention is the store's business, but the numbers are the user's, so they
-  // travel with every call rather than living in a config file of their own.
-  readonly property var storeEnvironment: ({
-    "NC_KEEP_DAYS": String(root.keepDays),
-    "NC_MAX_ITEMS": String(root.maxItems),
-    "NC_PREVIEWS": root.showPreview ? "1" : "0"
-  })
-
-  // The one long-running process: it follows the notification directories and
-  // prints each archived notification as a line of JSON. Everything the panel
-  // knows arrives either through here or through the load below.
-  Process {
-    id: watchProc
-    command: root.storeCommand(["watch"])
-    environment: root.storeEnvironment
-    running: true
-    stdout: SplitParser {
-      onRead: function(line) { root.absorb(line) }
-    }
-    // A watcher that died takes the live half of the panel with it and says
-    // nothing, so it is picked back up. The delay is what keeps a store that
-    // fails immediately, with no jq or no inotifywait, from becoming a process
-    // being spawned in a loop.
-    onExited: restartWatch.restart()
-  }
-
-  Timer {
-    id: restartWatch
-    interval: 30000
-    onTriggered: if (!watchProc.running) watchProc.running = true
-  }
-
-  Process {
-    id: listProc
-    environment: root.storeEnvironment
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var data
-        try {
-          data = JSON.parse(text)
-        } catch (e) {
-          return
-        }
-        if (!Array.isArray(data)) return
-        var wasLoaded = root.loaded
-        root.loaded = true
-        // Rebuilding throws away the scroll position and every delegate with
-        // it, so it only happens when the answer actually differs from what is
-        // already on screen. That is what lets this run on a timer.
-        if (wasLoaded && !root.differsFrom(data)) {
-          root.entries = data
-          return
-        }
-        root.entries = data
-        root.rebuild()
-      }
-    }
-  }
-
-  // Whether a fresh read says something the panel is not already showing.
-  // Length and the newest key between them catch everything that matters here:
-  // arrivals land at the top, removals change the count.
-  function differsFrom(data) {
-    if (data.length !== entries.length) return true
-    if (data.length === 0) return false
-    return String(data[0].key) !== String(entries[0].key)
-  }
-
-  function load() {
-    if (listProc.running) return
-    listProc.command = root.storeCommand(["list", String(root.pageSize)])
-    listProc.running = true
-  }
-
-  Process {
-    id: seenProc
-    environment: root.storeEnvironment
-    stdout: StdioCollector {
-      onStreamFinished: {
-        try {
-          var data = JSON.parse(text)
-          if (data.ok === true) root.lastSeen = Number(data.seen) || 0
-        } catch (e) {
-        }
-      }
-    }
-  }
-
-  function readSeen() {
-    if (seenProc.running) return
-    seenProc.command = root.storeCommand(["seen"])
-    seenProc.running = true
-  }
-
-  Process { id: markProc; environment: root.storeEnvironment }
-
-  // Opening the center is reading it. There is no separate "mark all read",
-  // because there is no state a notification can be in here other than seen or
-  // not yet seen, and looking at the list is what changes that.
-  function markSeen() {
-    var stamp = Date.now()
-    root.lastSeen = stamp
-    if (markProc.running) return
-    markProc.command = root.storeCommand(["seen", String(stamp)])
-    markProc.running = true
-  }
-
-  Process { id: removeProc; environment: root.storeEnvironment }
-  Process { id: clearProc; environment: root.storeEnvironment }
   Process { id: focusProc }
 
   function remove(key) {
-    if (!key) return
-    var next = []
-    for (var i = 0; i < entries.length; i++)
-      if (entries[i].key !== key) next.push(entries[i])
-    entries = next
-    rebuild()
-    // Queued rather than dropped when one is already running: a run of
-    // dismissals is exactly how this gets used, and each one is a file the
-    // store still has to be told about.
-    Quickshell.execDetached(root.storeCommand(["remove", String(key)]))
+    if (store) store.remove(key)
   }
 
   function clearAll() {
-    entries = []
-    rebuild()
-    if (clearProc.running) return
-    clearProc.command = root.storeCommand(["clear"])
-    clearProc.running = true
+    if (store) store.clearAll()
   }
 
-  // A notification that has just been archived, straight off the watcher.
-  function absorb(line) {
-    var entry
-    try {
-      entry = JSON.parse(line)
-    } catch (e) {
-      return
-    }
+  function handleEntryAdded(entry) {
     if (!entry || !entry.key) return
-    // The bar runs once per monitor and each copy has its own watcher, so the
-    // same notification arrives here as many times as you have screens.
-    for (var i = 0; i < entries.length; i++)
-      if (entries[i].key === entry.key) return
-
-    var next = [entry].concat(entries)
-    if (next.length > pageSize) next = next.slice(0, pageSize)
-    entries = next
-
-    // Reading it as it lands is still reading it.
-    if (root.opened) markSeen()
+    if (root.opened && store) store.markSeen()
     if (!matches(entry)) return
-
     rows.insert(0, rowFor(entry))
-    // A card inserted above the scroll position is a card you never see: the
-    // list holds its offset, so the new one lands out of sight and the panel
-    // looks like it missed it. Only when you are already at the top, though,
-    // because yanking the list back up under somebody who is reading further
-    // down is worse than making them scroll.
     if (root.opened && list.atYBeginning) Qt.callLater(function() {
       if (root.opened) list.positionViewAtBeginning()
     })
@@ -408,10 +263,7 @@ Panel {
 
   // ---------------------------------------------------------------- lifecycle
 
-  Component.onCompleted: {
-    readSeen()
-    load()
-  }
+  Component.onCompleted: bindStore()
 
   onOpenedChanged: {
     if (!opened) {
@@ -421,13 +273,9 @@ Panel {
       return
     }
     now = Date.now()
-    // The watcher keeps the list current while the panel is closed, so this is
-    // not a refresh so much as a reconciliation: it is the one moment worth
-    // spending a read on catching whatever a restart or a crashed watcher
-    // missed.
-    load()
+    if (store) store.load()
     readMark = lastSeen
-    markSeen()
+    if (store) store.markSeen()
   }
 
   // --------------------------------------------------------------------- bar
@@ -791,54 +639,5 @@ Panel {
         }
       }
     }
-  }
-
-
-  // Lets the panel be filled without waiting a week for real traffic:
-  //
-  //   omarchy-shell jankeesvw.notification-center.test seed 25
-  //   omarchy-shell jankeesvw.notification-center.test clear
-  //
-  // Synthetic input does not reach this shell, so a test hook is the only way
-  // to see what a full list looks like.
-  IpcHandler {
-    target: "jankeesvw.notification-center.test"
-
-    function seed(count: int): string {
-      Quickshell.execDetached(root.storeCommand(["seed", String(count > 0 ? count : 25)]))
-      reloadAfterSeed.restart()
-      return "seeding " + count
-    }
-
-    function clear(): string {
-      root.clearAll()
-      return "cleared"
-    }
-
-    function reload(): string {
-      root.load()
-      return "reloading"
-    }
-
-    // What the panel believes right now. For working out whether a
-    // notification reached the list, which is otherwise a question you can
-    // only answer by looking at the screen.
-    function state(): string {
-      return JSON.stringify({
-        opened: root.opened,
-        entries: root.entries.length,
-        rows: rows.count,
-        newest: root.entries.length > 0 ? root.entries[0].summary : "",
-        unread: root.unread,
-        watching: watchProc.running,
-        searching: root.searching
-      })
-    }
-  }
-
-  Timer {
-    id: reloadAfterSeed
-    interval: 600
-    onTriggered: root.load()
   }
 }
