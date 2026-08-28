@@ -420,7 +420,10 @@ remove_key() {
   grep -vF "\"key\":\"$key\"" "$archive" > "$archive.tmp" 2>/dev/null || : > "$archive.tmp"
   mv -f "$archive.tmp" "$archive"
   rm -f -- "$images/$key-appIcon" "$images/$key-image" "$images/$key-preview"
-  rm -f -- "$src_history/$key.json"
+  # Both directories, not only history: a notification dismissed while its
+  # toast is still on screen is sitting in the popup directory, and leaving it
+  # there means the move into history archives it again a moment later.
+  rm -f -- "$src_history/$key.json" "$src_dir/$key.json"
 }
 
 cmd_remove() {
