@@ -2,15 +2,17 @@
   "schemaVersion": 1,
   "id": "jankeesvw.notification-center",
   "name": "Notification Center",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Jankees van Woezik",
   "description": "Every notification you were sent, kept, and readable again",
   "homepage": "https://github.com/jankeesvw/omarchy-notification-center",
   "license": "MIT",
   "kinds": [
+    "service",
     "bar-widget"
   ],
   "entryPoints": {
+    "service": "Service.qml",
     "barWidget": "Panel.qml"
   },
   "barWidget": {
