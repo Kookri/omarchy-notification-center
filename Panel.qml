@@ -299,6 +299,15 @@ Panel {
     // different pictures of one state.
     text: root.dnd ? "\uDB80\uDC9B" : "\uDB80\uDC9A"
     dimmed: root.dnd
+
+    // The Highlight marker: no shape added beside the bell, the bell itself
+    // recoloured. BarIconButton already draws its glyph in activeColor while
+    // active, which is the same mechanism the bar's own indicators use to say
+    // a thing wants you, so this is that state rather than a second drawing of
+    // it. Accent instead of the inherited urgent, because unread mail is not
+    // an emergency.
+    active: root.badge === "Highlight" && root.unread > 0
+    activeColor: Color.accent
     tooltipText: {
       if (root.dnd) return root.unread > 0
         ? "Silenced · " + root.unread + " new" : "Notifications silenced"
@@ -330,7 +339,7 @@ Panel {
     visible: false
   }
 
-  // The unread marker, drawn over the bell rather than beside it: a bar that
+  // The Dot marker, drawn over the bell rather than beside it: a bar that
   // changes width every time a message arrives is a bar that twitches all day.
   Rectangle {
     id: dot

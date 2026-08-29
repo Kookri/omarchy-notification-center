@@ -45,7 +45,7 @@ icon and all, and keeps it for 30 days.
 
 | Setting | Default | |
 | --- | --- | --- |
-| Mark what you have not read | Dot | `Dot`, `Count` or `None` on the bell. |
+| Mark what you have not read | Dot | `Dot`, `Highlight`, `Count` or `None` on the bell. `Highlight` colours the bell itself instead of adding anything to it. |
 | Keep notifications for | 30 days | Older than this is deleted, icon and all. |
 | Keep at most | 1000 | A ceiling regardless of age. |
 | Clicking a notification | Auto | Opens the picture, or focuses the app. Or neither. |
