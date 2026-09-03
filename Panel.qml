@@ -476,39 +476,14 @@ Panel {
             // destructive in a different way, one silences and one deletes,
             // and a picture of a broom is not the place to find that out.
             Button {
-              id: clearButton
               anchors.verticalCenter: parent.verticalCenter
-              // Deleting a month of notifications is one click away from
-              // silencing them, and there is no undo. A second click is
-              // cheaper than a dialog and enough to make it deliberate; it
-              // forgets itself after a few seconds so the panel is never left
-              // armed.
-              property bool armed: false
-
-              text: armed ? "Sure?" : "Clear"
-              tooltipText: armed
-                ? "Click again to delete every notification kept here"
-                : "Delete every notification kept here"
-              foreground: armed ? Color.urgent : root.foreground
+              text: "Clear"
+              tooltipText: "Delete every notification kept here"
+              foreground: root.foreground
               fontFamily: root.fontFamily
               fontSize: Style.font.caption
               enabled: root.entries.length > 0
-              onClicked: {
-                if (armed) {
-                  armed = false
-                  disarm.stop()
-                  root.clearAll()
-                } else {
-                  armed = true
-                  disarm.restart()
-                }
-              }
-
-              Timer {
-                id: disarm
-                interval: 4000
-                onTriggered: clearButton.armed = false
-              }
+              onClicked: root.clearAll()
             }
           }
         }
