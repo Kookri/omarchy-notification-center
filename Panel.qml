@@ -397,7 +397,27 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: popup.fittedContentWidth(Style.space(root.panelWidth))
-    contentHeight: popup.fittedContentHeight(content.implicitHeight)
+    // fittedContentHeight() clamps against availableCardHeight, which collapses
+    // to its 120px minimum under a screen-sized bar window (see
+    // usableCardHeight below), so the same fit is done here against the
+    // corrected ceiling: the content plus the card insets, never taller than
+    // the space the screen actually has.
+    contentHeight: Math.round(Math.min(
+      Math.max(popup.verticalContentInset, content.implicitHeight + popup.verticalContentInset),
+      popup.usableCardHeight))
+
+    // The stock omarchy bar window is only as tall as the bar strip, so the
+    // screen minus that window is the space a panel has. Shibumi draws its
+    // strip inside a screen-sized window instead, which makes KeyboardPanel
+    // mistake the whole screen for the bar and collapse to its 120px safety
+    // minimum - a card a few entries tall no matter how much room there is.
+    // Measure the strip itself when the window is screen-sized; both bars
+    // expose barSize, so this works under either host.
+    readonly property real usableCardHeight: {
+      if (barH >= screenH && root.bar && Number(root.bar.barSize) > 0)
+        return Math.max(120, screenH - (Number(root.bar.barSize) + gap + margin))
+      return availableCardHeight
+    }
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -545,7 +565,7 @@ Panel {
             var chrome = header.height + search.implicitHeight + foot.implicitHeight
                        + content.spacing * 3
             return Math.max(Style.space(240),
-                            popup.availableCardHeight - popup.verticalContentInset - chrome)
+                            popup.usableCardHeight - popup.verticalContentInset - chrome)
           }
 
           height: Math.min(contentHeight, cap)
