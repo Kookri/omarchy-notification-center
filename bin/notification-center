@@ -327,12 +327,32 @@ prune() {
 
   [[ -s $archive ]] || return 0
 
-  kept=$(jq -c --argjson cutoff "$cutoff" 'select(.timestamp >= $cutoff)' "$archive" 2>/dev/null | tail -n "$max_items")
+  # Read first, and only then decide to write. A single unparseable line makes
+  # jq exit non-zero having printed nothing, and this used to run that nothing
+  # straight back over the archive: one bad byte and somebody's month of
+  # notifications was gone. The pipeline hid it twice over, because the status
+  # of `jq | tail` is tail's and tail is always happy, and because the `||` on
+  # the write emptied the file on the other branch as well. So no pipeline
+  # here, and a failed read leaves the archive exactly as it was.
+  #
+  # An empty result from a jq that *succeeded* is a real answer: everything in
+  # there has aged out, and the archive is meant to end up empty.
+  # `fromjson?` rather than a plain read: one unparseable line is skipped and
+  # the rest of the file still gets through. A plain `jq` stops dead at that
+  # line, which meant everything after it was missing from `kept` and was then
+  # written back over the archive as the new truth. Everything below the bad
+  # byte, gone.
+  if ! kept=$(jq -Rc --argjson cutoff "$cutoff" \
+      'fromjson? // empty | select(.timestamp >= $cutoff)' "$archive" 2>/dev/null); then
+    return 0
+  fi
+  kept=$(printf '%s\n' "$kept" | tail -n "$max_items")
+
   dropped=$(comm -23 \
     <(jq -r '.key' "$archive" 2>/dev/null | sort) \
     <(printf '%s\n' "$kept" | jq -r 'select(.key) | .key' 2>/dev/null | sort))
 
-  printf '%s\n' "$kept" | grep -v '^$' > "$archive.tmp" 2>/dev/null || : > "$archive.tmp"
+  printf '%s\n' "$kept" | grep -v '^$' > "$archive.tmp" || true
   mv -f "$archive.tmp" "$archive"
 
   local key
