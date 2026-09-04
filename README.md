@@ -34,8 +34,10 @@ icon and all, and keeps it for 30 days.
   command is chosen by whoever sent the notification, so a stored one would be
   an attacker's command waiting for a click. Only an absolute path to an image
   is kept, and it is opened by argument rather than through a shell.
-- **The × on a card**, or a right-click, removes one. **Clear** empties the
-  archive and asks twice.
+- **The × on a card**, or a right-click, removes one. **Clear** draws a line
+  under everything you have seen: the panel empties, and what was in it ages
+  out through the ordinary retention limits instead of being deleted on the
+  spot. Nothing is destroyed by a click, so nothing has to be confirmed.
 - **The bell in the header** is Do Not Disturb, the same switch as the bar's.
   Right-clicking the bell in the bar does it without opening anything.
 - **The magnifier**, or `/`, searches everything kept. Escape leaves the
