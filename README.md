@@ -42,6 +42,7 @@ icon and all, and keeps it for 30 days.
   Right-clicking the bell in the bar does it without opening anything.
 - **The magnifier**, or `/`, searches everything kept. Escape leaves the
   search, Escape again closes the panel.
+- **No grouping**, on purpose. Ten identical messages are ten cards, not one card with a ×10 on it. A stack hides when each one arrived, and the newest one on top hides whether an older one was urgent. If an app sends the same thing ten times, that is worth seeing as it is.
 
 ## Settings
 
