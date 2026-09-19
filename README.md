@@ -29,11 +29,11 @@ icon and all, and keeps it for 30 days.
 - **A picture** when there was one. Cameras and screenshot tools hand their
   file to the notification's action rather than setting an image on it, so the
   path is read out of there and a scaled copy is kept.
-- **Clicking a card** opens that picture, or focuses the app that sent the
-  notification. It never runs the command the notification arrived with: that
-  command is chosen by whoever sent the notification, so a stored one would be
-  an attacker's command waiting for a click. Only an absolute path to an image
-  is kept, and it is opened by argument rather than through a shell.
+- **Clicking a card** runs `omarchy-tasks open <note>` when that is what the
+  toast carried (task done / smoke-check), which is the same argv as clicking
+  the live notification. Otherwise it opens the picture, or focuses the app
+  that sent it. Other stored commands are still discarded; only an absolute
+  path to an image is kept besides that allowlisted argv.
 - **The × on a card**, or a right-click, removes one. **Clear** draws a line
   under everything you have seen: the panel empties, and what was in it ages
   out through the ordinary retention limits instead of being deleted on the
@@ -51,7 +51,7 @@ icon and all, and keeps it for 30 days.
 | Mark what you have not read | Dot | `Dot`, `Highlight`, `Count` or `None` on the bell. `Highlight` colours the bell itself instead of adding anything to it. |
 | Keep notifications for | 30 days | Older than this is deleted, icon and all. |
 | Keep at most | 1000 | A ceiling regardless of age. |
-| Clicking a notification | Auto | Opens the picture, or focuses the app. Or neither. |
+| Clicking a notification | Auto | Runs `omarchy-tasks open` when the toast carried that argv (same as clicking the live notification). Otherwise opens the picture, or focuses the app. Other commands are not kept. |
 | Show the message text | on | Off leaves the sender and subject only. |
 | Show pictures | on | Off stops keeping copies as well. |
 | Panel width | 420 | In the shell's spacing units. |

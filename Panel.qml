@@ -195,6 +195,7 @@ Panel {
       image: String(entry.image || ""),
       preview: String(entry.preview || ""),
       file: String(entry.file || ""),
+      execArgv: String(entry.execArgv || ""),
       glyph: String(entry.glyph || ""),
       urgency: Number(entry.urgency || 0),
       timestamp: Number(entry.timestamp || 0),
@@ -232,16 +233,45 @@ Panel {
 
   // What a click on an old notification should do.
   //
-  // Not what the notification asked for. A notification arrives carrying a
-  // shell command, chosen by whoever sent it, and anything on this machine can
-  // send one. Keeping that command and running it later is an attacker's
-  // command waiting for a click, which is worth nothing next to the one thing
-  // people actually want back: the picture. So what the store keeps is at most
-  // an absolute path to an image, and that is opened by argument rather than
-  // through a shell, so a hostile path is a file that fails to open instead of
-  // a command that runs.
+  // Arbitrary stored commands are still rejected. Task toasts on this desktop
+  // carry `omarchy-tasks open <note.md>` — the same argv the live toast runs —
+  // and that one vector is kept and replayed. Anything else falls through to
+  // opening an image path or focusing the sender.
+  function parseExecArgv(value) {
+    var text = String(value || "")
+    if (!text) return null
+    var parsed
+    try { parsed = JSON.parse(text) } catch (e) { return null }
+    if (!Array.isArray(parsed) || parsed.length === 0) return null
+    for (var i = 0; i < parsed.length; i++) {
+      if (typeof parsed[i] !== "string") return null
+    }
+    if (!parsed[0] || parsed[0].charAt(0) === "-") return null
+    return parsed
+  }
+
+  function taskOpenArgv(value) {
+    var argv = parseExecArgv(value)
+    if (!argv || argv.length !== 3) return null
+    var prog = argv[0]
+    var slash = prog.lastIndexOf("/")
+    var base = slash >= 0 ? prog.slice(slash + 1) : prog
+    if (prog.charAt(0) !== "/" || base !== "omarchy-tasks") return null
+    if (argv[1] !== "open") return null
+    if (!argv[2] || argv[2].charAt(0) === "-") return null
+    return argv
+  }
+
   function activate(row) {
     if (!row || clickAction === "Nothing") return
+    if (clickAction !== "Focus the app") {
+      var argv = root.taskOpenArgv(row.execArgv)
+      if (argv) {
+        Quickshell.execDetached(argv)
+        root.close()
+        return
+      }
+    }
     if (clickAction === "Auto" && row.file !== "") {
       Quickshell.execDetached(["xdg-open", row.file])
       root.close()

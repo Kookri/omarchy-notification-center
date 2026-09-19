@@ -202,6 +202,31 @@ preview_source() {
   printf '%s' "$action" | grep -oiE "(file://)?/[^\"' ]*\.(jpe?g|png|webp|gif)" | head -n 1
 }
 
+# Keep only the click action this desktop actually uses on task toasts:
+# ["/…/omarchy-tasks","open","Note.md"]. Anything else is still discarded —
+# stored argv is otherwise an attacker-chosen command waiting for a click.
+# The toast already runs this vector; the center should do the same thing.
+sanitize_exec() {
+  local raw=$1
+  [[ -n $raw ]] || { printf '%s' ""; return; }
+  printf '%s' "$raw" | jq -c '
+    (if type == "string" then (try fromjson catch empty) else . end)
+    | select(type == "array" and length == 3)
+    | select(.[0] | type == "string" and startswith("/") and (split("/") | last) == "omarchy-tasks")
+    | select(.[1] == "open")
+    | select(.[2] | type == "string" and . != "" and (startswith("-") | not))
+  ' 2>/dev/null || printf '%s' ""
+}
+
+source_json_for_key() {
+  local key=$1
+  if [[ -f $src_dir/$key.json ]]; then
+    printf '%s' "$src_dir/$key.json"
+  elif [[ -f $src_history/$key.json ]]; then
+    printf '%s' "$src_history/$key.json"
+  fi
+}
+
 # Take one of the service's JSON files into the archive, and print the entry
 # that was added.
 #
@@ -216,7 +241,7 @@ preview_source() {
 # replay the whole archive at both of them.
 ingest_file() {
   local file=$1 announce_existing=${2:-0}
-  local key entry app_icon image_src exec_src icon_copy image_copy file_src preview_copy
+  local key entry app_icon image_src exec_src exec_kept icon_copy image_copy file_src preview_copy
   key=$(basename -- "$file"); key=${key%.json}
   [[ -n $key ]] || return 0
   if is_dismissed "$key"; then
@@ -247,6 +272,7 @@ ingest_file() {
   image_src=$(jq -r '.image // ""' "$file")
   # execArgv is what the service writes now; exec is what it wrote before.
   exec_src=$(jq -r '.execArgv // .exec // ""' "$file")
+  exec_kept=$(sanitize_exec "$exec_src")
 
   icon_copy=$app_icon
   image_copy=$image_src
@@ -254,8 +280,8 @@ ingest_file() {
   is_path "$image_src" && image_copy=$(copy_image "$image_src" "$key" "image")
 
   # The path the action pointed at, if it pointed at an image. This is what a
-  # click opens; the command it came out of is discarded here and never
-  # reaches the archive.
+  # click opens when there is no allowlisted argv. Arbitrary commands still
+  # never reach the archive.
   file_src=$(preview_source "$exec_src")
   file_src=${file_src#file://}
 
@@ -270,6 +296,7 @@ ingest_file() {
     --arg image "$image_copy" \
     --arg preview "$preview_copy" \
     --arg file "$file_src" \
+    --arg execArgv "$exec_kept" \
     '{
        key: $key,
        app: (.app // ""),
@@ -279,6 +306,7 @@ ingest_file() {
        image: $image,
        preview: $preview,
        file: $file,
+       execArgv: $execArgv,
        glyph: (.glyph // ""),
        urgency: (.urgency // 1),
        timestamp: (.timestamp // 0)
@@ -402,9 +430,39 @@ sync_and_prune() {
   prune
 }
 
+# Entries archived before execArgv was kept have empty actions. Fill them from
+# the service's remaining JSON (only the last ten files still exist).
+backfill_exec() {
+  local tmp="$archive.exec" line key src exec_src kept
+  : > "$tmp"
+  while IFS= read -r line; do
+    [[ -n $line ]] || continue
+    kept=$(printf '%s' "$line" | jq -r '.execArgv // ""')
+    if [[ -n $kept ]]; then
+      printf '%s\n' "$line" >> "$tmp"
+      continue
+    fi
+    key=$(printf '%s' "$line" | jq -r '.key // ""')
+    src=$(source_json_for_key "$key")
+    if [[ -z $src ]]; then
+      printf '%s\n' "$line" >> "$tmp"
+      continue
+    fi
+    exec_src=$(jq -r '.execArgv // .exec // ""' "$src")
+    kept=$(sanitize_exec "$exec_src")
+    if [[ -n $kept ]]; then
+      printf '%s' "$line" | jq -c --arg e "$kept" '. + {execArgv: $e}' >> "$tmp"
+    else
+      printf '%s\n' "$line" >> "$tmp"
+    fi
+  done < "$archive"
+  mv -f "$tmp" "$archive"
+}
+
 cmd_sync() {
   ensure_store
   with_lock disarm_archive
+  with_lock backfill_exec
   with_lock sync_and_prune
 }
 

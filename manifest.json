@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "jankeesvw.notification-center",
   "name": "Notification Center",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "Jankees van Woezik",
   "description": "Every notification you were sent, kept, and readable again",
   "homepage": "https://github.com/jankeesvw/omarchy-notification-center",
@@ -75,7 +75,7 @@
           "Nothing"
         ],
         "defaultValue": "Auto",
-        "description": "Auto opens the picture a notification pointed at, a camera frame or a screenshot, and otherwise focuses the app that sent it. It never runs the command the notification arrived with: that command is chosen by whoever sent the notification, and a stored one is an attacker's command waiting for a click. Focus the app skips the file as well, and Nothing makes the list read-only."
+        "description": "Auto runs omarchy-tasks open when that is what the toast carried, otherwise opens the picture a notification pointed at, and otherwise focuses the app that sent it. Other stored commands are not kept. Focus the app skips the file as well, and Nothing makes the list read-only."
       },
       {
         "key": "showBody",
